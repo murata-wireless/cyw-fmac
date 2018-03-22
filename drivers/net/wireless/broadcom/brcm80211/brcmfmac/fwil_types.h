@@ -45,6 +45,11 @@
 #define BRCMF_SCAN_PARAMS_COUNT_MASK	0x0000ffff
 #define BRCMF_SCAN_PARAMS_NSSID_SHIFT	16
 
+/* scan type definitions */
+#define BRCMF_SCANTYPE_DEFAULT		0xFF
+#define BRCMF_SCANTYPE_ACTIVE		0
+#define BRCMF_SCANTYPE_PASSIVE		1
+
 #define BRCMF_WSEC_MAX_PSK_LEN		32
 #define	BRCMF_WSEC_PASSPHRASE		BIT(0)
 
@@ -123,6 +128,19 @@
 #define BRCMF_WOWL_MAXPATTERNS		8
 #define BRCMF_WOWL_MAXPATTERNSIZE	128
 
+enum {
+	BRCMF_UNICAST_FILTER_NUM = 0,
+	BRCMF_BROADCAST_FILTER_NUM,
+	BRCMF_MULTICAST4_FILTER_NUM,
+	BRCMF_MULTICAST6_FILTER_NUM,
+	BRCMF_MDNS_FILTER_NUM,
+	BRCMF_ARP_FILTER_NUM,
+	BRCMF_BROADCAST_ARP_FILTER_NUM,
+	MAX_PKT_FILTER_COUNT
+};
+
+#define MAX_PKTFILTER_PATTERN_SIZE		16
+
 #define BRCMF_COUNTRY_BUF_SZ		4
 #define BRCMF_ANT_MAX			4
 
@@ -150,9 +168,9 @@
 #define BRCMF_MFP_CAPABLE		1
 #define BRCMF_MFP_REQUIRED		2
 
-/* MAX_CHUNK_LEN is the amount of the clm file we send in each ioctl.
- * It is relatively small because dongles (FW) have a small maximum size
- * input payload restriction for ioctls.
+/* MAX_CHUNK_LEN is the maximum length for data passing to firmware in each
+ * ioctl. It is relatively small because firmware has small maximum size input
+ * playload restriction for ioctls.
  */
 #define MAX_CHUNK_LEN			1400
 
@@ -160,7 +178,6 @@
 #define DLOAD_FLAG_VER_MASK		0xf000	/* Downloader version mask */
 #define DLOAD_FLAG_VER_SHIFT		12	/* Downloader version shift */
 
-#define DL_CRC_NOT_INUSE		0x0001
 #define DL_BEGIN			0x0002
 #define DL_END				0x0004
 
@@ -838,6 +855,33 @@ struct brcmf_pno_macaddr_le {
 };
 
 /**
+ * struct brcmf_dload_data_le - data passing to firmware for downloading
+ * @flag: flags related to download data.
+ * @dload_type: type of download data.
+ * @len: length in bytes of download data.
+ * @crc: crc of download data.
+ * @data: download data.
+ */
+struct brcmf_dload_data_le {
+	__le16 flag;
+	__le16 dload_type;
+	__le32 len;
+	__le32 crc;
+	u8 data[1];
+};
+
+/**
+ * struct brcmf_pno_bssid_le - bssid configuration for PNO scan.
+ *
+ * @bssid: BSS network identifier.
+ * @flags: flags for this BSSID.
+ */
+struct brcmf_pno_bssid_le {
+	u8 bssid[ETH_ALEN];
+	__le16 flags;
+};
+
+/**
  * struct brcmf_pktcnt_le - packet counters.
  *
  * @rx_good_pkt: packets (MSDUs & MMPDUs) received from this station
@@ -867,15 +911,69 @@ struct brcmf_gtk_keyinfo_le {
 	u8 replay_counter[BRCMF_RSN_REPLAY_LEN];
 };
 
+#define BRCMF_PNO_REPORT_NO_BATCH	BIT(2)
+
 /**
- * struct brcmf_dload_data_le - data passing to firmware for downloading
+ * struct brcmf_gscan_bucket_config - configuration data for channel bucket.
+ *
+ * @bucket_end_index: last channel index in @channel_list in
+ *	@struct brcmf_pno_config_le.
+ * @bucket_freq_multiple: scan interval expressed in N * @scan_freq.
+ * @flag: channel bucket report flags.
+ * @reserved: for future use.
+ * @repeat: number of scan at interval for exponential scan.
+ * @max_freq_multiple: maximum scan interval for exponential scan.
  */
-struct brcmf_dload_data_le {
-	__le16 flag;
-	__le16 dload_type;
-	__le32 len;
-	__le32 crc;
-	u8 data[1];
+struct brcmf_gscan_bucket_config {
+	u8 bucket_end_index;
+	u8 bucket_freq_multiple;
+	u8 flag;
+	u8 reserved;
+	__le16 repeat;
+	__le16 max_freq_multiple;
+};
+
+/* version supported which must match firmware */
+#define BRCMF_GSCAN_CFG_VERSION                     2
+
+/**
+ * enum brcmf_gscan_cfg_flags - bit values for gscan flags.
+ *
+ * @BRCMF_GSCAN_CFG_FLAGS_ALL_RESULTS: send probe responses/beacons to host.
+ * @BRCMF_GSCAN_CFG_ALL_BUCKETS_IN_1ST_SCAN: all buckets will be included in
+ *	first scan cycle.
+ * @BRCMF_GSCAN_CFG_FLAGS_CHANGE_ONLY: indicated only flags member is changed.
+ */
+enum brcmf_gscan_cfg_flags {
+	BRCMF_GSCAN_CFG_FLAGS_ALL_RESULTS = BIT(0),
+	BRCMF_GSCAN_CFG_ALL_BUCKETS_IN_1ST_SCAN = BIT(3),
+	BRCMF_GSCAN_CFG_FLAGS_CHANGE_ONLY = BIT(7),
+};
+
+/**
+ * struct brcmf_gscan_config - configuration data for gscan.
+ *
+ * @version: version of the api to match firmware.
+ * @flags: flags according %enum brcmf_gscan_cfg_flags.
+ * @buffer_threshold: percentage threshold of buffer to generate an event.
+ * @swc_nbssid_threshold: number of BSSIDs with significant change that
+ *	will generate an event.
+ * @swc_rssi_window_size: size of rssi cache buffer (max=8).
+ * @count_of_channel_buckets: number of array members in @bucket.
+ * @retry_threshold: !unknown!
+ * @lost_ap_window: !unknown!
+ * @bucket: array of channel buckets.
+ */
+struct brcmf_gscan_config {
+	__le16 version;
+	u8 flags;
+	u8 buffer_threshold;
+	u8 swc_nbssid_threshold;
+	u8 swc_rssi_window_size;
+	u8 count_of_channel_buckets;
+	u8 retry_threshold;
+	__le16  lost_ap_window;
+	struct brcmf_gscan_bucket_config bucket[1];
 };
 
 #endif /* FWIL_TYPES_H_ */

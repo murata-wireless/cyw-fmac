@@ -1,7 +1,3 @@
-config KERNEL_4_0
-    def_bool y
-config KERNEL_4_1
-    def_bool y
 config KERNEL_4_2
     def_bool y
 config KERNEL_4_3

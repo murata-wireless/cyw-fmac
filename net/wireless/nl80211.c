@@ -291,8 +291,7 @@ static const struct nla_policy nl80211_policy[NUM_NL80211_ATTR] = {
 	[NL80211_ATTR_WPA_VERSIONS] = { .type = NLA_U32 },
 	[NL80211_ATTR_PID] = { .type = NLA_U32 },
 	[NL80211_ATTR_4ADDR] = { .type = NLA_U8 },
-	[NL80211_ATTR_PMKID] = { .type = NLA_BINARY,
-				 .len = WLAN_PMKID_LEN },
+	[NL80211_ATTR_PMKID] = { .len = WLAN_PMKID_LEN },
 	[NL80211_ATTR_DURATION] = { .type = NLA_U32 },
 	[NL80211_ATTR_COOKIE] = { .type = NLA_U64 },
 	[NL80211_ATTR_TX_RATES] = { .type = NLA_NESTED },
@@ -348,6 +347,7 @@ static const struct nla_policy nl80211_policy[NUM_NL80211_ATTR] = {
 	[NL80211_ATTR_SCAN_FLAGS] = { .type = NLA_U32 },
 	[NL80211_ATTR_P2P_CTWINDOW] = { .type = NLA_U8 },
 	[NL80211_ATTR_P2P_OPPPS] = { .type = NLA_U8 },
+	[NL80211_ATTR_LOCAL_MESH_POWER_MODE] = {. type = NLA_U32 },
 	[NL80211_ATTR_ACL_POLICY] = {. type = NLA_U32 },
 	[NL80211_ATTR_MAC_ADDRS] = { .type = NLA_NESTED },
 	[NL80211_ATTR_STA_CAPABILITY] = { .type = NLA_U16 },
@@ -520,7 +520,7 @@ nl80211_bss_select_policy[NL80211_BSS_SELECT_ATTR_MAX + 1] = {
 static const struct nla_policy
 nl80211_nan_func_policy[NL80211_NAN_FUNC_ATTR_MAX + 1] = {
 	[NL80211_NAN_FUNC_TYPE] = { .type = NLA_U8 },
-	[NL80211_NAN_FUNC_SERVICE_ID] = { .type = NLA_BINARY,
+	[NL80211_NAN_FUNC_SERVICE_ID] = {
 				    .len = NL80211_NAN_FUNC_SERVICE_ID_LEN },
 	[NL80211_NAN_FUNC_PUBLISH_TYPE] = { .type = NLA_U8 },
 	[NL80211_NAN_FUNC_PUBLISH_BCAST] = { .type = NLA_FLAG },
@@ -547,6 +547,14 @@ nl80211_nan_srf_policy[NL80211_NAN_SRF_ATTR_MAX + 1] = {
 				 .len =  NL80211_NAN_FUNC_SRF_MAX_LEN },
 	[NL80211_NAN_SRF_BF_IDX] = { .type = NLA_U8 },
 	[NL80211_NAN_SRF_MAC_ADDRS] = { .type = NLA_NESTED },
+};
+
+/* policy for packet pattern attributes */
+static const struct nla_policy
+nl80211_packet_pattern_policy[MAX_NL80211_PKTPAT + 1] = {
+	[NL80211_PKTPAT_MASK] = { .type = NLA_BINARY, },
+	[NL80211_PKTPAT_PATTERN] = { .type = NLA_BINARY, },
+	[NL80211_PKTPAT_OFFSET] = { .type = NLA_U32 },
 };
 
 static int nl80211_prepare_wdev_dump(struct sk_buff *skb,
@@ -3795,8 +3803,8 @@ static void nl80211_check_ap_rate_selectors(struct cfg80211_ap_settings *params,
 static void nl80211_calculate_ap_params(struct cfg80211_ap_settings *params)
 {
 	const struct cfg80211_beacon_data *bcn = &params->beacon;
-	size_t ies_len = bcn->beacon_ies_len;
-	const u8 *ies = bcn->beacon_ies;
+	size_t ies_len = bcn->tail_len;
+	const u8 *ies = bcn->tail;
 	const u8 *rates;
 	const u8 *cap;
 
@@ -6476,6 +6484,10 @@ static int validate_scan_freqs(struct nlattr *freqs)
 	struct nlattr *attr1, *attr2;
 	int n_channels = 0, tmp1, tmp2;
 
+	nla_for_each_nested(attr1, freqs, tmp1)
+		if (nla_len(attr1) != sizeof(u32))
+			return 0;
+
 	nla_for_each_nested(attr1, freqs, tmp1) {
 		n_channels++;
 		/*
@@ -7508,6 +7520,7 @@ static int nl80211_channel_switch(struct sk_buff *skb, struct genl_info *info)
 	static struct nlattr *csa_attrs[NL80211_ATTR_MAX+1];
 	int err;
 	bool need_new_beacon = false;
+	bool need_handle_dfs_flag = true;
 	int len, i;
 	u32 cs_count;
 
@@ -7519,6 +7532,12 @@ static int nl80211_channel_switch(struct sk_buff *skb, struct genl_info *info)
 	case NL80211_IFTYPE_AP:
 	case NL80211_IFTYPE_P2P_GO:
 		need_new_beacon = true;
+		/* For all modes except AP the handle_dfs flag needs to be
+		 * supplied to tell the kernel that userspace will handle radar
+		 * events when they happen. Otherwise a switch to a channel
+		 * requiring DFS will be rejected.
+		 */
+		need_handle_dfs_flag = false;
 
 		/* useless if AP is not running */
 		if (!wdev->beacon_interval)
@@ -7641,8 +7660,13 @@ skip_beacons:
 	if (err < 0)
 		return err;
 
-	if (err > 0)
+	if (err > 0) {
 		params.radar_required = true;
+		if (need_handle_dfs_flag &&
+		    !nla_get_flag(info->attrs[NL80211_ATTR_HANDLE_DFS])) {
+			return -EINVAL;
+		}
+	}
 
 	if (info->attrs[NL80211_ATTR_CH_SWITCH_BLOCK_TX])
 		params.block_tx = true;
@@ -9985,11 +10009,17 @@ static int nl80211_join_mesh(struct sk_buff *skb, struct genl_info *info)
 		if (err)
 			return err;
 
+		if (!setup.chandef.chan)
+			return -EINVAL;
+
 		err = validate_beacon_tx_rate(rdev, setup.chandef.chan->band,
 					      &setup.beacon_rate);
 		if (err)
 			return err;
 	}
+
+	setup.userspace_handles_dfs =
+		nla_get_flag(info->attrs[NL80211_ATTR_HANDLE_DFS]);
 
 	return cfg80211_join_mesh(rdev, dev, &setup, &cfg);
 }
@@ -10525,7 +10555,8 @@ static int nl80211_set_wowlan(struct sk_buff *skb, struct genl_info *info)
 			u8 *mask_pat;
 
 			nla_parse_nested(pat_tb, MAX_NL80211_PKTPAT, pat,
-					 NULL, genl_info_extack(info));
+					 nl80211_packet_pattern_policy,
+					 genl_info_extack(info));
 			err = -EINVAL;
 			if (!pat_tb[NL80211_PKTPAT_MASK] ||
 			    !pat_tb[NL80211_PKTPAT_PATTERN])
@@ -10775,7 +10806,8 @@ static int nl80211_parse_coalesce_rule(struct cfg80211_registered_device *rdev,
 			    rem) {
 		u8 *mask_pat;
 
-		nla_parse_nested(pat_tb, MAX_NL80211_PKTPAT, pat, NULL, NULL);
+		nla_parse_nested(pat_tb, MAX_NL80211_PKTPAT, pat,
+				 nl80211_packet_pattern_policy, NULL);
 		if (!pat_tb[NL80211_PKTPAT_MASK] ||
 		    !pat_tb[NL80211_PKTPAT_PATTERN])
 			return -EINVAL;
@@ -10900,6 +10932,9 @@ static int nl80211_set_rekey_data(struct sk_buff *skb, struct genl_info *info)
 	if (err)
 		return err;
 
+	if (!tb[NL80211_REKEY_DATA_REPLAY_CTR] || !tb[NL80211_REKEY_DATA_KEK] ||
+	    !tb[NL80211_REKEY_DATA_KCK])
+		return -EINVAL;
 	if (nla_len(tb[NL80211_REKEY_DATA_REPLAY_CTR]) != NL80211_REPLAY_CTR_LEN)
 		return -ERANGE;
 	if (nla_len(tb[NL80211_REKEY_DATA_KEK]) != NL80211_KEK_LEN)
@@ -11208,10 +11243,6 @@ static int nl80211_nan_add_func(struct sk_buff *skb,
 	if (!info->attrs[NL80211_ATTR_NAN_FUNC])
 		return -EINVAL;
 
-	if (wdev->owner_nlportid &&
-	    wdev->owner_nlportid != genl_info_snd_portid(info))
-		return -ENOTCONN;
-
 	err = nla_parse_nested(tb, NL80211_NAN_FUNC_ATTR_MAX,
 			       info->attrs[NL80211_ATTR_NAN_FUNC],
 			       nl80211_nan_func_policy,
@@ -11445,10 +11476,6 @@ static int nl80211_nan_del_func(struct sk_buff *skb,
 
 	if (!info->attrs[NL80211_ATTR_COOKIE])
 		return -EINVAL;
-
-	if (wdev->owner_nlportid &&
-	    wdev->owner_nlportid != genl_info_snd_portid(info))
-		return -ENOTCONN;
 
 	cookie = nla_get_u64(info->attrs[NL80211_ATTR_COOKIE]);
 
@@ -13806,7 +13833,9 @@ void nl80211_send_roamed(struct cfg80211_registered_device *rdev,
 		     info->req_ie)) ||
 	    (info->resp_ie &&
 	     nla_put(msg, NL80211_ATTR_RESP_IE, info->resp_ie_len,
-		     info->resp_ie)))
+		     info->resp_ie)) ||
+	    (info->authorized &&
+	     nla_put_flag(msg, NL80211_ATTR_PORT_AUTHORIZED)))
 		goto nla_put_failure;
 
 	genlmsg_end(msg, hdr);
