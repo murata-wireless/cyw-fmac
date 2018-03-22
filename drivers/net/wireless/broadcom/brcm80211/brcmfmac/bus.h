@@ -116,6 +116,17 @@ struct brcmf_bus_msgbuf {
 
 
 /**
+ * struct brcmf_bus_stats - bus statistic counters.
+ *
+ * @pktcowed: packets cowed for extra headroom/unorphan.
+ * @pktcow_failed: packets dropped due to failed cow-ing.
+ */
+struct brcmf_bus_stats {
+	atomic_t pktcowed;
+	atomic_t pktcow_failed;
+};
+
+/**
  * struct brcmf_bus - interface structure between common and bus layer
  *
  * @bus_priv: pointer to private bus device.
@@ -123,11 +134,10 @@ struct brcmf_bus_msgbuf {
  * @dev: device pointer of bus device.
  * @drvr: public driver information.
  * @state: operational state of the bus interface.
+ * @stats: statistics shared between common and bus layer.
  * @maxctl: maximum size for rxctl request message.
- * @tx_realloc: number of tx packets realloced for headroom.
- * @dstats: dongle-based statistical data.
- * @dcmd_list: bus/device specific dongle initialization commands.
  * @chip: device identifier of the dongle chip.
+ * @always_use_fws_queue: bus wants use queue also when fwsignal is inactive.
  * @wowl_supported: is wowl supported by bus driver.
  * @chiprev: revision of the dongle chip.
  */
@@ -141,8 +151,8 @@ struct brcmf_bus {
 	struct device *dev;
 	struct brcmf_pub *drvr;
 	enum brcmf_bus_state state;
+	struct brcmf_bus_stats stats;
 	uint maxctl;
-	unsigned long tx_realloc;
 	u32 chip;
 	u32 chiprev;
 	bool always_use_fws_queue;
@@ -221,9 +231,6 @@ static inline
 int brcmf_bus_get_fwname(struct brcmf_bus *bus, uint chip, uint chiprev,
 			 unsigned char *fw_name)
 {
-	if (!bus->ops->get_fwname)
-		return -EOPNOTSUPP;
-
 	return bus->ops->get_fwname(bus->dev, chip, chiprev, fw_name);
 }
 

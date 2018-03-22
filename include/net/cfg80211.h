@@ -1443,6 +1443,9 @@ struct mesh_config {
  * @mcast_rate: multicat rate for Mesh Node [6Mbps is the default for 802.11a]
  * @basic_rates: basic rates to use when creating the mesh
  * @beacon_rate: bitrate to be used for beacons
+ * @userspace_handles_dfs: whether user space controls DFS operation, i.e.
+ *	changes the channel when a radar is detected. This is required
+ *	to operate on DFS channels.
  *
  * These parameters are fixed when the mesh is created.
  */
@@ -1464,6 +1467,7 @@ struct mesh_setup {
 	int mcast_rate[NUM_NL80211_BANDS];
 	u32 basic_rates;
 	struct cfg80211_bitrate_mask beacon_rate;
+	bool userspace_handles_dfs;
 };
 
 /**
@@ -5440,6 +5444,9 @@ cfg80211_connect_timeout(struct net_device *dev, const u8 *bssid,
  * @req_ie_len: association request IEs length
  * @resp_ie: association response IEs (may be %NULL)
  * @resp_ie_len: assoc response IEs length
+ * @authorized: true if the 802.1X authentication was done by the driver or is
+ *	not needed (e.g., when Fast Transition protocol was used), false
+ *	otherwise. Ignored for networks that don't use 802.1X authentication.
  */
 struct cfg80211_roam_info {
 	struct ieee80211_channel *channel;
@@ -5449,6 +5456,7 @@ struct cfg80211_roam_info {
 	size_t req_ie_len;
 	const u8 *resp_ie;
 	size_t resp_ie_len;
+	bool authorized;
 };
 
 /**
