@@ -180,7 +180,6 @@ static int brcmf_c_process_clm_blob(struct brcmf_if *ifp)
 	u16 dl_flag = DL_BEGIN;
 	u32 status;
 	s32 err;
-	uint retries = 0;
 
 	brcmf_dbg(TRACE, "Enter\n");
 
@@ -191,22 +190,12 @@ static int brcmf_c_process_clm_blob(struct brcmf_if *ifp)
 		return err;
 	}
 
-	do {
-		err = request_firmware(&clm, clm_name, dev);
-	} while (err == -EAGAIN && retries++ < CLM_LOAD_RETRIES);
-	if (err) {
-		if (err == -ENOENT) {
-			brcmf_dbg(INFO, "continue with CLM data currently present in firmware\n");
-			return 0;
-		} else if (err == -EAGAIN) {
-			brcmf_dbg(INFO, "reached maximum retries(%d)\n",
-				  CLM_LOAD_RETRIES);
-			brcmf_dbg(INFO, "continue with CLM data in firmware\n");
-			return 0;
-		}
-		brcmf_err("request CLM blob file failed (%d)\n", err);
-		return err;
-	}
+ 	err = request_firmware_direct(&clm, clm_name, dev);
+ 	if (err) {
+		brcmf_info("no clm_blob available(err=%d), device may have limited channels available\n",
+			   err);
+		return 0;
+ 	}
 
 	chunk_buf = kzalloc(sizeof(*chunk_buf) + MAX_CHUNK_LEN - 1, GFP_KERNEL);
 	if (!chunk_buf) {
@@ -316,7 +305,7 @@ int brcmf_c_preinit_dcmds(struct brcmf_if *ifp)
 	strsep(&ptr, "\n");
 
 	/* Print fw version info */
-	brcmf_info("Murata Customized Version: imx-krogoth-battra_r1.0;\n");
+	brcmf_info("Murata Customized Version: imx-krogoth-battra_r1.1;\n");
 	brcmf_info("Firmware version = %s\n", buf);
 
 	/* locate firmware version number for ethtool */
