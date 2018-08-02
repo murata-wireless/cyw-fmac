@@ -134,6 +134,12 @@ config BPAUTO_RHASHTABLE
 	#h-file linux/rhashtable.h
 	#c-file lib/rhashtable.c
 
+config BPAUTO_BUCKET_LOCKS
+	bool
+	# the API of bucket_locks that we need was introduced in version 4.16
+	depends on KERNEL_4_16
+	default y if BPAUTO_RHASHTABLE
+
 config BPAUTO_BUILD_HDMI
 	depends on n
 	bool

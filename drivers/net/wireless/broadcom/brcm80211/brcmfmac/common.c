@@ -45,8 +45,6 @@ const u8 ALLFFMAC[ETH_ALEN] = { 0xff, 0xff, 0xff, 0xff, 0xff, 0xff };
 
 #define BRCMF_DEFAULT_TXGLOM_SIZE	32  /* max tx frames in glom chain */
 
-#define CLM_LOAD_RETRIES 1 /* # of retries to load clm_blob file */
-
 static int brcmf_sdiod_txglomsz = BRCMF_DEFAULT_TXGLOM_SIZE;
 module_param_named(txglomsz, brcmf_sdiod_txglomsz, int, 0);
 MODULE_PARM_DESC(txglomsz, "Maximum tx packet chain size [SDIO]");
@@ -81,9 +79,9 @@ static int brcmf_eap_restrict;
 module_param_named(eap_restrict, brcmf_eap_restrict, int, 0400);
 MODULE_PARM_DESC(eap_restrict, "Block non-802.1X frames until auth finished");
 
-static int brcmf_sdio_dpc_prio;
-module_param_named(sdio_dpc_prio, brcmf_sdio_dpc_prio, int, S_IRUSR);
-MODULE_PARM_DESC(sdio_dpc_prio, "The scheduling priority of sdio_dpc thread");
+static int brcmf_sdio_wq_highpri;
+module_param_named(sdio_wq_highpri, brcmf_sdio_wq_highpri, int, 0);
+MODULE_PARM_DESC(sdio_wq_highpri, "SDIO workqueue is set to high priority");
 
 #ifdef DEBUG
 /* always succeed brcmf_bus_started() */
@@ -190,12 +188,12 @@ static int brcmf_c_process_clm_blob(struct brcmf_if *ifp)
 		return err;
 	}
 
- 	err = request_firmware_direct(&clm, clm_name, dev);
- 	if (err) {
+	err = request_firmware(&clm, clm_name, dev);
+	if (err) {
 		brcmf_info("no clm_blob available(err=%d), device may have limited channels available\n",
 			   err);
 		return 0;
- 	}
+	}
 
 	chunk_buf = kzalloc(sizeof(*chunk_buf) + MAX_CHUNK_LEN - 1, GFP_KERNEL);
 	if (!chunk_buf) {
@@ -458,7 +456,7 @@ struct brcmf_mp_device *brcmf_get_module_param(struct device *dev,
 	settings->fcmode = brcmf_fcmode;
 	settings->roamoff = !!brcmf_roamoff;
 	settings->eap_restrict = !!brcmf_eap_restrict;
-	settings->sdio_dpc_prio = brcmf_sdio_dpc_prio;
+	settings->sdio_wq_highpri = !!brcmf_sdio_wq_highpri;
 #ifdef DEBUG
 	settings->ignore_probe_fail = !!brcmf_ignore_probe_fail;
 #endif

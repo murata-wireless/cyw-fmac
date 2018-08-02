@@ -1,5 +1,5 @@
-#ifndef __BACKPORT_TIMKEEPING_H
-#define __BACKPORT_TIMKEEPING_H
+#ifndef __BACKPORT_TIMEKEEPING_H
+#define __BACKPORT_TIMEKEEPING_H
 #include <linux/version.h>
 #include <linux/types.h>
 
@@ -33,6 +33,22 @@ static inline time64_t ktime_get_seconds(void)
 
 	return t.tv_sec;
 }
+
+static inline time64_t ktime_get_real_seconds(void)
+{
+	struct timeval tv;
+
+	do_gettimeofday(&tv);
+
+	return tv.tv_sec;
+}
 #endif
 
-#endif /* __BACKPORT_TIMKEEPING_H */
+#if LINUX_VERSION_IS_LESS(3,17,0)
+static inline void ktime_get_ts64(struct timespec64 *ts)
+{
+	ktime_get_ts(ts);
+}
+#endif
+
+#endif /* __BACKPORT_TIMEKEEPING_H */
