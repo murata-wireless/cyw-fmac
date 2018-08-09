@@ -303,6 +303,7 @@ int brcmf_c_preinit_dcmds(struct brcmf_if *ifp)
 	strsep(&ptr, "\n");
 
 	/* Print fw version info */
+	brcmf_info("Murata Customized Version: imx-krogoth-mothra_r1.0;\n");
 	brcmf_info("Firmware version = %s\n", buf);
 
 	/* locate firmware version number for ethtool */
