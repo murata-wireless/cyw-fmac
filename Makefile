@@ -3,6 +3,7 @@
 #
 
 ifeq ($(KERNELRELEASE),)
+
 MAKEFLAGS += --no-print-directory
 SHELL := /bin/bash
 BACKPORT_DIR := $(shell pwd)

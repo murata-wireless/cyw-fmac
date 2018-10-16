@@ -1,4 +1,3 @@
-#include "backport-4.12.c" /* Murata: To resolve missing symbols of bp_extack */
 #include <linux/module.h>
 #include <linux/init.h>
 #include <linux/pm_qos.h>
