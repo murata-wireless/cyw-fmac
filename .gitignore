@@ -19,3 +19,4 @@ kconf/conf
 .tmp_versions
 Module.symvers
 *.mod.c
+.cache.mk
