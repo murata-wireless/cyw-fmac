@@ -1,17 +1,6 @@
+// SPDX-License-Identifier: ISC
 /*
  * Copyright (c) 2014 Broadcom Corporation
- *
- * Permission to use, copy, modify, and/or distribute this software for any
- * purpose with or without fee is hereby granted, provided that the above
- * copyright notice and this permission notice appear in all copies.
- *
- * THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
- * WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
- * MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY
- * SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
- * WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN ACTION
- * OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF OR IN
- * CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
 #ifndef _vendor_h_
@@ -25,6 +14,11 @@ enum brcmf_vndr_cmds {
 	BRCMF_VNDR_CMDS_LAST
 };
 
+enum brcmf_vndr_evts {
+	BRCMF_VNDR_EVTS_PHY_TEMP,
+	BRCMF_VNDR_EVTS_LAST
+};
+
 /**
  * enum brcmf_nlattrs - nl80211 message attributes
  *
@@ -36,10 +30,20 @@ enum brcmf_nlattrs {
 
 	BRCMF_NLATTR_LEN,
 	BRCMF_NLATTR_DATA,
+	BRCMF_NLATTR_VERS,
+	BRCMF_NLATTR_PHY_TEMP,
+	BRCMF_NLATTR_PHY_TEMPDELTA,
 
 	__BRCMF_NLATTR_AFTER_LAST,
 	BRCMF_NLATTR_MAX = __BRCMF_NLATTR_AFTER_LAST - 1
 };
+
+/* structure of event sent up by firmware: is this the right place for it? */
+struct brcmf_phy_temp_evt {
+	__le32 version;
+	__le32 temp;
+	__le32 tempdelta;
+} __packed;
 
 /**
  * struct brcmf_vndr_dcmd_hdr - message header for cfg80211 vendor command dcmd
@@ -60,5 +64,9 @@ struct brcmf_vndr_dcmd_hdr {
 };
 
 extern const struct wiphy_vendor_command brcmf_vendor_cmds[];
+extern const struct nl80211_vendor_cmd_info brcmf_vendor_events[];
+s32 brcmf_wiphy_phy_temp_evt_handler(struct brcmf_if *ifp,
+				     const struct brcmf_event_msg *e,
+				     void *data);
 
 #endif /* _vendor_h_ */

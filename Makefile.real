@@ -20,11 +20,10 @@ menuconfig:
 	silentoldconfig olddefconfig oldnoconfig \
 	allnoconfig allyesconfig allmodconfig \
 	alldefconfig randconfig
-	listnewconfig oldaskconfig oldconfig \
-	silentoldconfig olddefconfig oldnoconfig \
-	allnoconfig allyesconfig allmodconfig \
-	alldefconfig
-randconfig:
+listnewconfig oldaskconfig oldconfig \
+silentoldconfig olddefconfig oldnoconfig \
+allnoconfig allyesconfig allmodconfig \
+alldefconfig randconfig:
 	@$(MAKE) -C kconf conf
 	@./kconf/conf --$@ Kconfig
 
