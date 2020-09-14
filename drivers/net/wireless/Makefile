@@ -27,3 +27,5 @@ obj-$(CPTCFG_WLAN_VENDOR_BROADCOM) += broadcom/
 #obj-$(CPTCFG_USB_NET_RNDIS_WLAN)	+= rndis_wlan.o
 #
 #obj-$(CPTCFG_MAC80211_HWSIM)	+= mac80211_hwsim.o
+#
+#obj-$(CPTCFG_VIRT_WIFI)	+= virt_wifi.o

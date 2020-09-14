@@ -263,6 +263,16 @@ netdev_features_t passthru_features_check(struct sk_buff *skb,
 					  netdev_features_t features);
 #endif /* LINUX_VERSION_IS_LESS(4,1,0) */
 
+#if LINUX_VERSION_IS_LESS(4,2,0)
+#undef u64_stats_init
+static inline void u64_stats_init(struct u64_stats_sync *syncp)
+{
+#if BITS_PER_LONG == 32 && defined(CONFIG_SMP)
+	seqcount_init(&syncp->seq);
+#endif
+}
+#endif /* LINUX_VERSION_IS_LESS(4,2,0) */
+
 #ifndef netdev_alloc_pcpu_stats
 #define netdev_alloc_pcpu_stats(type)				\
 ({								\
@@ -279,13 +289,21 @@ netdev_features_t passthru_features_check(struct sk_buff *skb,
 })
 #endif /* netdev_alloc_pcpu_stats */
 
-#if LINUX_VERSION_IS_LESS(3,19,0)
-#define napi_complete_done LINUX_BACKPORT(napi_complete_done)
-static inline void napi_complete_done(struct napi_struct *n, int work_done)
+#if LINUX_VERSION_IS_LESS(4,10,0)
+static inline bool backport_napi_complete_done(struct napi_struct *n, int work_done)
 {
+	if (unlikely(test_bit(NAPI_STATE_NPSVC, &n->state)))
+		return false;
+
+#if LINUX_VERSION_IS_LESS(3,19,0)
 	napi_complete(n);
-}
+#else
+	napi_complete_done(n, work_done);
 #endif /* < 3.19 */
+	return true;
+}
+#define napi_complete_done LINUX_BACKPORT(napi_complete_done)
+#endif /* < 4.10 */
 
 #if LINUX_VERSION_IS_LESS(4,5,0)
 #define netif_tx_napi_add LINUX_BACKPORT(netif_tx_napi_add)
@@ -346,6 +364,14 @@ static inline int _bp_netdev_upper_dev_link(struct net_device *dev,
 	netdev_upper_dev_link(dev, upper)
 #define netdev_upper_dev_link(...) \
 	macro_dispatcher(netdev_upper_dev_link, __VA_ARGS__)(__VA_ARGS__)
+#endif
+
+#if LINUX_VERSION_IS_LESS(5,0,0)
+static inline int backport_dev_open(struct net_device *dev, struct netlink_ext_ack *extack)
+{
+	return dev_open(dev);
+}
+#define dev_open LINUX_BACKPORT(dev_open)
 #endif
 
 #endif /* __BACKPORT_NETDEVICE_H */
