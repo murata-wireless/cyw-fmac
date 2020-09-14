@@ -373,12 +373,37 @@ static inline void skb_put_u8(struct sk_buff *skb, u8 val)
 }
 #endif
 
-#if LINUX_VERSION_IS_LESS(4,19,0)
+#if LINUX_VERSION_IS_LESS(4,20,0)
 static inline struct sk_buff *__skb_peek(const struct sk_buff_head *list_)
 {
 	return list_->next;
 }
 #endif
 
+#if LINUX_VERSION_IS_LESS(4,11,0)
+#define skb_mac_offset LINUX_BACKPORT(skb_mac_offset)
+static inline int skb_mac_offset(const struct sk_buff *skb)
+{
+	return skb_mac_header(skb) - skb->data;
+}
+#endif
+
+#if LINUX_VERSION_IS_LESS(5,4,0)
+/**
+ * skb_frag_off() - Returns the offset of a skb fragment
+ * @frag: the paged fragment
+ */
+#define skb_frag_off LINUX_BACKPORT(skb_frag_off)
+static inline unsigned int skb_frag_off(const skb_frag_t *frag)
+{
+	return frag->page_offset;
+}
+
+#define nf_reset_ct LINUX_BACKPORT(nf_reset_ct)
+static inline void nf_reset_ct(struct sk_buff *skb)
+{
+	nf_reset(skb);
+}
+#endif
 
 #endif /* __BACKPORT_SKBUFF_H */
