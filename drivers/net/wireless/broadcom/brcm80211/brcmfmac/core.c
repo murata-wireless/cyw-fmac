@@ -1374,7 +1374,8 @@ void brcmf_fw_crashed(struct device *dev)
 
 	brcmf_dev_coredump(dev);
 
-	schedule_work(&drvr->bus_reset);
+	if (drvr->bus_reset.func)
+		schedule_work(&drvr->bus_reset);
 }
 
 void brcmf_detach(struct device *dev)
@@ -1397,6 +1398,11 @@ void brcmf_detach(struct device *dev)
 #endif
 
 	brcmf_bus_change_state(bus_if, BRCMF_BUS_DOWN);
+	/* make sure primary interface removed last */
+	for (i = BRCMF_MAX_IFS - 1; i > -1; i--) {
+		if (drvr->iflist[i])
+			brcmf_remove_interface(drvr->iflist[i], false);
+	}
 	brcmf_bus_stop(drvr->bus_if);
 
 	brcmf_fweh_detach(drvr);
@@ -1405,12 +1411,6 @@ void brcmf_detach(struct device *dev)
 	if (drvr->mon_if) {
 		brcmf_net_detach(drvr->mon_if->ndev, false);
 		drvr->mon_if = NULL;
-	}
-
-	/* make sure primary interface removed last */
-	for (i = BRCMF_MAX_IFS - 1; i > -1; i--) {
-		if (drvr->iflist[i])
-			brcmf_del_if(drvr, drvr->iflist[i]->bsscfgidx, false);
 	}
 
 	if (drvr->config) {

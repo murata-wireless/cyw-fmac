@@ -44,7 +44,10 @@
 
 /* watermark expressed in number of words */
 #define DEFAULT_F2_WATERMARK    0x8
-#define CY_4373_F2_WATERMARK    0x40
+#define CY_4373_F2_WATERMARK    0x4C
+#define CY_4373_MES_WATERMARK    0x44
+#define CY_4373_MESBUSYCTRL    (CY_4373_MES_WATERMARK | \
+				 SBSDIO_MESBUSYCTRL_ENAB)
 #define CY_43012_F2_WATERMARK    0x60
 #define CY_43012_MES_WATERMARK  0x50
 #define CY_43012_MESBUSYCTRL    (CY_43012_MES_WATERMARK | \
@@ -135,8 +138,6 @@ struct rte_console {
 				 biggest possible glom */
 
 #define BRCMF_FIRSTREAD	(1 << 6)
-
-#define BRCMF_CONSOLE	10	/* watchdog interval to poll console */
 
 /* SBSDIO_DEVICE_CTL */
 
@@ -671,13 +672,17 @@ static void pkt_align(struct sk_buff *p, int len, int align)
 	__skb_trim(p, len);
 }
 
-/* To check if there's window offered
- * Reserve 3 credits for txctl
- */
+/* To check if there's window offered */
 static bool data_ok(struct brcmf_sdio *bus)
 {
-	return (u8)(bus->tx_max - bus->tx_seq) > TXCTL_CREDITS &&
-	       ((u8)(bus->tx_max - bus->tx_seq) & 0x80) == 0;
+	u8 tx_rsv = 0;
+
+	/* Reserve TXCTL_CREDITS credits for txctl when it is ready to send */
+	if (bus->ctrl_frame_stat)
+		tx_rsv = TXCTL_CREDITS;
+
+	return (bus->tx_max - bus->tx_seq - tx_rsv) != 0 &&
+	       ((bus->tx_max - bus->tx_seq - tx_rsv) & 0x80) == 0;
 }
 
 /* To check if there's window offered */
@@ -4461,8 +4466,7 @@ static void brcmf_sdio_firmware_callback(struct device *dev, int err,
 			brcmf_sdiod_writeb(sdiod, SBSDIO_DEVICE_CTL, devctl,
 					   &err);
 			brcmf_sdiod_writeb(sdiod, SBSDIO_FUNC1_MESBUSYCTRL,
-					   CY_4373_F2_WATERMARK |
-					   SBSDIO_MESBUSYCTRL_ENAB, &err);
+					   CY_4373_MESBUSYCTRL, &err);
 			break;
 		case SDIO_DEVICE_ID_CYPRESS_43012:
 			brcmf_dbg(INFO, "set F2 watermark to 0x%x*4 bytes\n",
@@ -4758,6 +4762,7 @@ void brcmf_sdio_remove(struct brcmf_sdio *bus)
 		brcmf_sdiod_intr_unregister(bus->sdiodev);
 
 		brcmf_detach(bus->sdiodev->dev);
+		brcmf_free(bus->sdiodev->dev);
 
 		cancel_work_sync(&bus->datawork);
 		if (bus->brcmf_wq)
