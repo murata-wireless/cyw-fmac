@@ -124,6 +124,7 @@ struct brcmf_pub {
 
 	u32 feat_flags;
 	u32 chip_quirks;
+	int req_mpc;
 
 	struct brcmf_rev_info revinfo;
 #ifdef DEBUG
@@ -138,6 +139,7 @@ struct brcmf_pub {
 
 	u8 clmver[BRCMF_DCMD_SMLEN];
 	struct brcmf_pkt_filter_enable_le pkt_filter[MAX_PKT_FILTER_COUNT];
+	u8 sta_mac_idx;
 
 };
 

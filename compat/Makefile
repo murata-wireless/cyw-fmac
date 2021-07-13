@@ -70,6 +70,7 @@ quiet_cmd_build_OID_registry = GEN     $@
 compat-$(CPTCFG_BPAUTO_ASN1_DECODER) += lib-asn1_decoder.o
 compat-$(CPTCFG_BPAUTO_BUILD_SYSTEM_DATA_VERIFICATION) += lib-oid_registry.o
 compat-$(CPTCFG_BPAUTO_REFCOUNT) += lib-refcount.o
+compat-$(CPTCFG_BPAUTO_BUILD_WANT_DEV_COREDUMP) += drivers-base-devcoredump.o
 compat-$(CPTCFG_BPAUTO_RHASHTABLE) += lib-rhashtable.o
 cordic-objs += lib-math-cordic.o
 obj-$(CPTCFG_BPAUTO_BUILD_CORDIC) += cordic.o
