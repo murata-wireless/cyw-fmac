@@ -14,7 +14,7 @@ BACKPORTS_CFLAGS += -g
 endif
 endif
 
-NOSTDINC_FLAGS := \
+NOSTDINC_FLAGS += \
 	-I$(M)/backport-include/ \
 	-I$(M)/backport-include/uapi \
 	-I$(M)/include/ \
@@ -31,7 +31,7 @@ export backport_srctree = $(M)
 else
 export BACKPORT_DIR = backports/
 export backport_srctree = $(BACKPORT_DIR)
-NOSTDINC_FLAGS := \
+NOSTDINC_FLAGS += \
 	-I$(BACKPORT_DIR)/backport-include/ \
 	-I$(BACKPORT_DIR)/backport-include/uapi \
 	-I$(BACKPORT_DIR)/include/ \

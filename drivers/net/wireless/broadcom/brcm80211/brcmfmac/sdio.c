@@ -3,6 +3,7 @@
  * Copyright (c) 2010 Broadcom Corporation
  */
 
+#include <linux/version.h>
 #include <linux/types.h>
 #include <linux/atomic.h>
 #include <linux/kernel.h>
@@ -37,6 +38,7 @@
 #include "common.h"
 #include "bcdc.h"
 #include "fwil.h"
+#include "bt_shared_sdio.h"
 
 #define DCMD_RESP_TIMEOUT	msecs_to_jiffies(2500)
 #define CTL_DONE_TIMEOUT	msecs_to_jiffies(2500)
@@ -44,9 +46,9 @@
 
 /* watermark expressed in number of words */
 #define DEFAULT_F2_WATERMARK    0x8
-#define CY_4373_F2_WATERMARK    0x4C
-#define CY_4373_MES_WATERMARK    0x44
-#define CY_4373_MESBUSYCTRL    (CY_4373_MES_WATERMARK | \
+#define CY_4373_F2_WATERMARK	0x4C
+#define CY_4373_MES_WATERMARK	0x44
+#define CY_4373_MESBUSYCTRL	(CY_4373_MES_WATERMARK | \
 				 SBSDIO_MESBUSYCTRL_ENAB)
 #define CY_43012_F2_WATERMARK    0x60
 #define CY_43012_MES_WATERMARK  0x50
@@ -63,6 +65,11 @@
 #define CY_435X_F2_WATERMARK	0x40
 #define CY_435X_F1_MESBUSYCTRL	(CY_435X_F2_WATERMARK | \
 				 SBSDIO_MESBUSYCTRL_ENAB)
+#define CY_89459_F2_WATERMARK	0x40
+#define CY_89459_MES_WATERMARK	0x40
+#define CY_89459_MESBUSYCTRL	(CY_89459_MES_WATERMARK | \
+				 SBSDIO_MESBUSYCTRL_ENAB)
+
 #ifdef DEBUG
 
 #define BRCMF_TRAP_INFO_SIZE	80
@@ -628,6 +635,7 @@ CY_FW_DEF(4339, "cyfmac4339-sdio");
 BRCMF_FW_DEF(43430A0, "brcmfmac43430a0-sdio");
 /* Note the names are not postfixed with a1 for backward compatibility */
 CY_FW_DEF(43430A1, "cyfmac43430-sdio");
+CY_FW_DEF(43439, "cyfmac43439-sdio");
 CY_FW_DEF(43455, "cyfmac43455-sdio");
 BRCMF_FW_DEF(43456, "brcmfmac43456-sdio");
 CY_FW_DEF(4354, "cyfmac4354-sdio");
@@ -635,6 +643,7 @@ CY_FW_DEF(4356, "cyfmac4356-sdio");
 CY_FW_DEF(4359, "cyfmac4359-sdio");
 CY_FW_DEF(4373, "cyfmac4373-sdio");
 CY_FW_DEF(43012, "cyfmac43012-sdio");
+CY_FW_DEF(89459, "cyfmac54591-sdio");
 
 static const struct brcmf_firmware_mapping brcmf_sdio_fwnames[] = {
 	BRCMF_FW_ENTRY(BRCM_CC_43143_CHIP_ID, 0xFFFFFFFF, 43143),
@@ -650,14 +659,17 @@ static const struct brcmf_firmware_mapping brcmf_sdio_fwnames[] = {
 	BRCMF_FW_ENTRY(BRCM_CC_43362_CHIP_ID, 0xFFFFFFFE, 43362),
 	BRCMF_FW_ENTRY(BRCM_CC_4339_CHIP_ID, 0xFFFFFFFF, 4339),
 	BRCMF_FW_ENTRY(BRCM_CC_43430_CHIP_ID, 0x00000001, 43430A0),
-	BRCMF_FW_ENTRY(BRCM_CC_43430_CHIP_ID, 0xFFFFFFFE, 43430A1),
+	BRCMF_FW_ENTRY(BRCM_CC_43430_CHIP_ID, 0x0000001E, 43430A1),
+	BRCMF_FW_ENTRY(BRCM_CC_43430_CHIP_ID, 0xFFFFFFE0, 43439),
 	BRCMF_FW_ENTRY(BRCM_CC_4345_CHIP_ID, 0x00000200, 43456),
 	BRCMF_FW_ENTRY(BRCM_CC_4345_CHIP_ID, 0xFFFFFDC0, 43455),
 	BRCMF_FW_ENTRY(BRCM_CC_4354_CHIP_ID, 0xFFFFFFFF, 4354),
 	BRCMF_FW_ENTRY(BRCM_CC_4356_CHIP_ID, 0xFFFFFFFF, 4356),
 	BRCMF_FW_ENTRY(BRCM_CC_4359_CHIP_ID, 0xFFFFFFFF, 4359),
+	BRCMF_FW_ENTRY(CY_CC_43439_CHIP_ID, 0xFFFFFFFF, 43439),
 	BRCMF_FW_ENTRY(CY_CC_4373_CHIP_ID, 0xFFFFFFFF, 4373),
-	BRCMF_FW_ENTRY(CY_CC_43012_CHIP_ID, 0xFFFFFFFF, 43012)
+	BRCMF_FW_ENTRY(CY_CC_43012_CHIP_ID, 0xFFFFFFFF, 43012),
+	BRCMF_FW_ENTRY(CY_CC_89459_CHIP_ID, 0xFFFFFFFF, 89459)
 };
 
 #define TXCTL_CREDITS	2
@@ -683,13 +695,14 @@ static bool data_ok(struct brcmf_sdio *bus)
 
 	return (bus->tx_max - bus->tx_seq - tx_rsv) != 0 &&
 	       ((bus->tx_max - bus->tx_seq - tx_rsv) & 0x80) == 0;
+
 }
 
 /* To check if there's window offered */
 static bool txctl_ok(struct brcmf_sdio *bus)
 {
-	return (u8)(bus->tx_max - bus->tx_seq) != 0 &&
-	       ((u8)(bus->tx_max - bus->tx_seq) & 0x80) == 0;
+	return (bus->tx_max - bus->tx_seq) != 0 &&
+	       ((bus->tx_max - bus->tx_seq) & 0x80) == 0;
 }
 
 static int
@@ -934,6 +947,20 @@ static int brcmf_sdio_clkctl(struct brcmf_sdio *bus, uint target, bool pendok)
 		break;
 
 	case CLK_SDONLY:
+#ifdef CPTCFG_BRCMFMAC_BT_SHARED_SDIO
+		/* If the request is to switch off backplane clock,
+		 * confirm that BT is inactive before doing so.
+		 * If this call had come from Non Watchdog context any way
+		 * the Watchdog would switch off the clock again when
+		 * nothing is to be done & BT has finished using the bus.
+		 */
+		if (brcmf_btsdio_bus_count(bus->sdiodev->bus_if)) {
+			brcmf_dbg(SDIO, "BT is active, not switching off\n");
+			brcmf_sdio_wd_timer(bus, true);
+			break;
+		}
+
+#endif /* CPTCFG_BRCMFMAC_BT_SHARED_SDIO */
 		/* Remove HT request, or bring up SD clock */
 		if (bus->clkstate == CLK_NONE)
 			brcmf_sdio_sdclk(bus, true);
@@ -945,6 +972,19 @@ static int brcmf_sdio_clkctl(struct brcmf_sdio *bus, uint target, bool pendok)
 		break;
 
 	case CLK_NONE:
+#ifdef CPTCFG_BRCMFMAC_BT_SHARED_SDIO
+		/* If the request is to switch off backplane clock,
+		 * confirm that BT is inactive before doing so.
+		 * If this call had come from non-watchdog context any way
+		 * the watchdog would switch off the clock again when
+		 * nothing is to be done & BT has finished using the bus.
+		 */
+		if (brcmf_btsdio_bus_count(bus->sdiodev->bus_if)) {
+			brcmf_dbg(SDIO, "BT is active, not switching off\n");
+			break;
+		}
+#endif /* CPTCFG_BRCMFMAC_BT_SHARED_SDIO */
+
 		/* Make sure to remove HT request */
 		if (bus->clkstate == CLK_AVAIL)
 			brcmf_sdio_htclk(bus, false, false);
@@ -968,6 +1008,29 @@ brcmf_sdio_bus_sleep(struct brcmf_sdio *bus, bool sleep, bool pendok)
 	brcmf_dbg(SDIO, "Enter: request %s currently %s\n",
 		  (sleep ? "SLEEP" : "WAKE"),
 		  (bus->sleeping ? "SLEEP" : "WAKE"));
+
+#ifdef CPTCFG_BRCMFMAC_BT_SHARED_SDIO
+	/* The following is the assumption based on which the hook is placed.
+	 * From WLAN driver, either from the active contexts OR from the
+	 * watchdog contexts, we will be attempting to go to sleep. At that
+	 * moment if we see that BT is still actively using the bus, we will
+	 * return -EBUSY from here, and the bus sleep state would not have
+	 * changed, so the caller can then schedule the watchdog again
+	 * which will come and attempt to sleep at a later point.
+	 *
+	 * In case if BT is the only one and is the last user, we don't switch
+	 * off the clock immediately, we allow the WLAN to decide when to sleep
+	 * i.e from the watchdog.
+	 * Now if the watchdog becomes active and attempts to switch off the
+	 * clock and if another WLAN context is active they are any way
+	 * serialized with sdlock.
+	 */
+	if (brcmf_btsdio_bus_count(bus->sdiodev->bus_if)) {
+		brcmf_dbg(SDIO, "Cannot sleep when BT is active\n");
+		err = -EBUSY;
+		goto done;
+	}
+#endif /* CPTCFG_BRCMFMAC_BT_SHARED_SDIO */
 
 	/* If SR is enabled control bus state with KSO */
 	if (bus->sr_enabled) {
@@ -1717,7 +1780,7 @@ static u8 brcmf_sdio_rxglom(struct brcmf_sdio *bus, u8 rxseq)
 				brcmf_rx_event(bus->sdiodev->dev, pfirst);
 			else
 				brcmf_rx_frame(bus->sdiodev->dev, pfirst,
-					       false);
+					       false, false);
 			bus->sdcnt.rxglompkts++;
 		}
 
@@ -1972,7 +2035,10 @@ static uint brcmf_sdio_readframes(struct brcmf_sdio *bus, uint maxframes)
 			if (brcmf_sdio_hdparse(bus, bus->rxhdr, &rd_new,
 					       BRCMF_SDIO_FT_NORMAL)) {
 				rd->len = 0;
+				brcmf_sdio_rxfail(bus, true, true);
+				sdio_release_host(bus->sdiodev->func1);
 				brcmu_pkt_buf_free_skb(pkt);
+				continue;
 			}
 			bus->sdcnt.rx_readahead_cnt++;
 			if (rd->len != roundup(rd_new.len, 16)) {
@@ -2048,7 +2114,7 @@ static uint brcmf_sdio_readframes(struct brcmf_sdio *bus, uint maxframes)
 			brcmf_rx_event(bus->sdiodev->dev, pkt);
 		else
 			brcmf_rx_frame(bus->sdiodev->dev, pkt,
-				       false);
+				       false, false);
 
 		/* prepare the descriptor for the next read */
 		rd->len = rd->len_nxtfrm << 4;
@@ -2464,6 +2530,14 @@ static bool brcmf_chip_is_ulp(struct brcmf_chip *ci)
 		return false;
 }
 
+static bool brcmf_sdio_use_ht_avail(struct brcmf_chip *ci)
+{
+	if (ci->chip == CY_CC_4373_CHIP_ID)
+		return true;
+	else
+		return false;
+}
+
 static void brcmf_sdio_bus_stop(struct device *dev)
 {
 	struct brcmf_bus *bus_if = dev_get_drvdata(dev);
@@ -2500,7 +2574,8 @@ static void brcmf_sdio_bus_stop(struct device *dev)
 					    &err);
 		if (!err) {
 			bpreq = saveclk;
-			bpreq |= brcmf_chip_is_ulp(bus->ci) ?
+			bpreq |= (brcmf_sdio_use_ht_avail(bus->ci) ||
+				   brcmf_chip_is_ulp(bus->ci)) ?
 				SBSDIO_HT_AVAIL_REQ : SBSDIO_FORCE_HT;
 			brcmf_sdiod_writeb(sdiodev,
 					   SBSDIO_FUNC1_CHIPCLKCSR,
@@ -2824,6 +2899,9 @@ static void brcmf_sdio_dpc(struct brcmf_sdio *bus)
 		atomic_set(&bus->fcstate,
 			   !!(newstatus & (I_HMB_FC_STATE | I_HMB_FC_CHANGE)));
 		intstatus |= (newstatus & bus->hostintmask);
+#ifdef CPTCFG_BRCMFMAC_BT_SHARED_SDIO
+		brcmf_btsdio_int_handler(bus->sdiodev->bus_if);
+#endif /* CPTCFG_BRCMFMAC_BT_SHARED_SDIO */
 	}
 
 	/* Handle host mailbox indication */
@@ -3627,7 +3705,8 @@ static void brcmf_sdio_sr_init(struct brcmf_sdio *bus)
 
 	brcmf_dbg(TRACE, "Enter\n");
 
-	if (brcmf_chip_is_ulp(bus->ci)) {
+	if (brcmf_sdio_use_ht_avail(bus->ci) ||
+	    brcmf_chip_is_ulp(bus->ci)) {
 		wakeupctrl = SBSDIO_FUNC1_WCTRL_ALPWAIT_SHIFT;
 		chipclkcsr = SBSDIO_HT_AVAIL_REQ;
 	} else {
@@ -3828,7 +3907,7 @@ void brcmf_sdio_trigger_dpc(struct brcmf_sdio *bus)
 	}
 }
 
-void brcmf_sdio_isr(struct brcmf_sdio *bus)
+void brcmf_sdio_isr(struct brcmf_sdio *bus, bool in_isr)
 {
 	brcmf_dbg(TRACE, "Enter\n");
 
@@ -3839,7 +3918,7 @@ void brcmf_sdio_isr(struct brcmf_sdio *bus)
 
 	/* Count the interrupt call */
 	bus->sdcnt.intrcount++;
-	if (in_interrupt())
+	if (in_isr)
 		atomic_set(&bus->ipend, 1);
 	else
 		if (brcmf_sdio_intr_rstatus(bus)) {
@@ -3914,7 +3993,8 @@ static void brcmf_sdio_bus_watchdog(struct brcmf_sdio *bus)
 #endif				/* DEBUG */
 
 	/* On idle timeout clear activity flag and/or turn off clock */
-	if (!bus->dpc_triggered) {
+	if (!bus->dpc_triggered &&
+	    brcmf_btsdio_bus_count(bus->sdiodev->bus_if) == 0) {
 		rmb();
 		if ((!bus->dpc_running) && (bus->idletime > 0) &&
 		    (bus->clkstate == CLK_AVAIL)) {
@@ -4425,7 +4505,8 @@ static void brcmf_sdio_firmware_callback(struct device *dev, int err,
 	saveclk = brcmf_sdiod_readb(sdiod, SBSDIO_FUNC1_CHIPCLKCSR, &err);
 	if (!err) {
 		bpreq = saveclk;
-		bpreq |= brcmf_chip_is_ulp(bus->ci) ?
+		bpreq |= (brcmf_sdio_use_ht_avail(bus->ci) ||
+			  brcmf_chip_is_ulp(bus->ci)) ?
 			SBSDIO_HT_AVAIL_REQ : SBSDIO_FORCE_HT;
 		brcmf_sdiod_writeb(sdiod, SBSDIO_FUNC1_CHIPCLKCSR,
 				   bpreq, &err);
@@ -4451,7 +4532,7 @@ static void brcmf_sdio_firmware_callback(struct device *dev, int err,
 				   bus->hostintmask, NULL);
 
 		switch (sdiod->func1->device) {
-		case SDIO_DEVICE_ID_CYPRESS_4373:
+		case SDIO_DEVICE_ID_BROADCOM_CYPRESS_4373:
 			brcmf_dbg(INFO, "set F2 watermark to 0x%x*4 bytes\n",
 				  CY_4373_F2_WATERMARK);
 			brcmf_sdiod_writeb(sdiod, SBSDIO_WATERMARK,
@@ -4464,7 +4545,7 @@ static void brcmf_sdio_firmware_callback(struct device *dev, int err,
 			brcmf_sdiod_writeb(sdiod, SBSDIO_FUNC1_MESBUSYCTRL,
 					   CY_4373_MESBUSYCTRL, &err);
 			break;
-		case SDIO_DEVICE_ID_CYPRESS_43012:
+		case SDIO_DEVICE_ID_BROADCOM_CYPRESS_43012:
 			brcmf_dbg(INFO, "set F2 watermark to 0x%x*4 bytes\n",
 				  CY_43012_F2_WATERMARK);
 			brcmf_sdiod_writeb(sdiod, SBSDIO_WATERMARK,
@@ -4477,8 +4558,9 @@ static void brcmf_sdio_firmware_callback(struct device *dev, int err,
 			brcmf_sdiod_writeb(sdiod, SBSDIO_FUNC1_MESBUSYCTRL,
 					   CY_43012_MESBUSYCTRL, &err);
 			break;
+		case SDIO_DEVICE_ID_BROADCOM_4329:
 		case SDIO_DEVICE_ID_BROADCOM_4339:
-			brcmf_dbg(INFO, "set F2 watermark to 0x%x*4 bytes for 4339\n",
+			brcmf_dbg(INFO, "set F2 watermark to 0x%x*4 bytes\n",
 				  CY_4339_F2_WATERMARK);
 			brcmf_sdiod_writeb(sdiod, SBSDIO_WATERMARK,
 					   CY_4339_F2_WATERMARK, &err);
@@ -4491,7 +4573,7 @@ static void brcmf_sdio_firmware_callback(struct device *dev, int err,
 					   CY_4339_MESBUSYCTRL, &err);
 			break;
 		case SDIO_DEVICE_ID_BROADCOM_43455:
-			brcmf_dbg(INFO, "set F2 watermark to 0x%x*4 bytes for 43455\n",
+			brcmf_dbg(INFO, "set F2 watermark to 0x%x*4 bytes\n",
 				  CY_43455_F2_WATERMARK);
 			brcmf_sdiod_writeb(sdiod, SBSDIO_WATERMARK,
 					   CY_43455_F2_WATERMARK, &err);
@@ -4518,6 +4600,22 @@ static void brcmf_sdio_firmware_callback(struct device *dev, int err,
 			brcmf_sdiod_writeb(sdiod, SBSDIO_FUNC1_MESBUSYCTRL,
 					   CY_435X_F1_MESBUSYCTRL, &err);
 			break;
+		case SDIO_DEVICE_ID_BROADCOM_CYPRESS_89459:
+		case SDIO_DEVICE_ID_CYPRESS_54590:
+		case SDIO_DEVICE_ID_CYPRESS_54591:
+		case SDIO_DEVICE_ID_CYPRESS_54594:
+			brcmf_dbg(INFO, "set F2/MES watermark to 0x%x*4 / 0x%x bytes for 89459\n",
+				  CY_89459_F2_WATERMARK, CY_89459_MESBUSYCTRL);
+			brcmf_sdiod_writeb(sdiod, SBSDIO_WATERMARK,
+					   CY_89459_F2_WATERMARK, &err);
+			devctl = brcmf_sdiod_readb(sdiod, SBSDIO_DEVICE_CTL,
+						   &err);
+			devctl |= SBSDIO_DEVCTL_F2WM_ENAB;
+			brcmf_sdiod_writeb(sdiod, SBSDIO_DEVICE_CTL, devctl,
+					   &err);
+			brcmf_sdiod_writeb(sdiod, SBSDIO_FUNC1_MESBUSYCTRL,
+					   CY_89459_MESBUSYCTRL, &err);
+			break;
 		default:
 			brcmf_sdiod_writeb(sdiod, SBSDIO_WATERMARK,
 					   DEFAULT_F2_WATERMARK, &err);
@@ -4538,6 +4636,12 @@ static void brcmf_sdio_firmware_callback(struct device *dev, int err,
 	}
 
 	if (err == 0) {
+		/* Assign bus interface call back */
+		sdiod->bus_if->dev = sdiod->dev;
+		sdiod->bus_if->ops = &brcmf_sdio_bus_ops;
+		sdiod->bus_if->chip = bus->ci->chip;
+		sdiod->bus_if->chiprev = bus->ci->chiprev;
+
 		/* Allow full data communication using DPC from now on. */
 		brcmf_sdiod_change_state(bus->sdiodev, BRCMF_SDIOD_DATA);
 
@@ -4558,17 +4662,19 @@ static void brcmf_sdio_firmware_callback(struct device *dev, int err,
 	bus->sdcnt.tickcnt = 0;
 	brcmf_sdio_wd_timer(bus, true);
 
-	/* Assign bus interface call back */
-	sdiod->bus_if->dev = sdiod->dev;
-	sdiod->bus_if->ops = &brcmf_sdio_bus_ops;
-	sdiod->bus_if->chip = bus->ci->chip;
-	sdiod->bus_if->chiprev = bus->ci->chiprev;
-
 	err = brcmf_alloc(sdiod->dev, sdiod->settings);
 	if (err) {
 		brcmf_err("brcmf_alloc failed\n");
 		goto claim;
 	}
+
+#ifdef CPTCFG_BRCMFMAC_BT_SHARED_SDIO
+	err = brcmf_btsdio_init(bus_if);
+	if (err) {
+		brcmf_err("brcmf_btsdio_init failed\n");
+		goto free;
+	}
+#endif /* CPTCFG_BRCMFMAC_BT_SHARED_SDIO */
 
 	/* Attach to the common layer, reserve hdr space */
 	err = brcmf_attach(sdiod->dev, !bus->sdiodev->ulp);
@@ -4578,7 +4684,7 @@ static void brcmf_sdio_firmware_callback(struct device *dev, int err,
 	}
 
 	/* Register for ULP events */
-	if (sdiod->func1->device == SDIO_DEVICE_ID_CYPRESS_43012)
+	if (sdiod->func1->device == SDIO_DEVICE_ID_BROADCOM_CYPRESS_43012)
 		brcmf_fweh_register(bus_if->drvr, BRCMF_E_ULP,
 				    brcmf_ulp_event_notify);
 
@@ -4652,21 +4758,9 @@ struct brcmf_sdio *brcmf_sdio_probe(struct brcmf_sdio_dev *sdiodev)
 	bus->txminmax = BRCMF_TXMINMAX;
 	bus->tx_seq = SDPCM_SEQ_WRAP - 1;
 
-	/* attempt to attach to the dongle */
-	if (!(brcmf_sdio_probe_attach(bus))) {
-		brcmf_err("brcmf_sdio_probe_attach failed\n");
-		goto fail;
-	}
-
 	/* single-threaded workqueue */
-	if (sdiodev->settings->sdio_wq_highpri) {
-		wq = alloc_workqueue("brcmf_wq/%s",
-				     WQ_HIGHPRI | WQ_MEM_RECLAIM | WQ_UNBOUND,
-				     1, dev_name(&sdiodev->func1->dev));
-	} else {
-		wq = alloc_ordered_workqueue("brcmf_wq/%s", WQ_MEM_RECLAIM,
-					     dev_name(&sdiodev->func1->dev));
-	}
+	wq = alloc_ordered_workqueue("brcmf_wq/%s", WQ_MEM_RECLAIM | WQ_HIGHPRI,
+				     dev_name(&sdiodev->func1->dev));
 	if (!wq) {
 		brcmf_err("insufficient memory to create txworkqueue\n");
 		goto fail;
@@ -4674,6 +4768,12 @@ struct brcmf_sdio *brcmf_sdio_probe(struct brcmf_sdio_dev *sdiodev)
 	brcmf_sdiod_freezer_count(sdiodev);
 	INIT_WORK(&bus->datawork, brcmf_sdio_dataworker);
 	bus->brcmf_wq = wq;
+
+	/* attempt to attach to the dongle */
+	if (!(brcmf_sdio_probe_attach(bus))) {
+		brcmf_err("brcmf_sdio_probe_attach failed\n");
+		goto fail;
+	}
 
 	spin_lock_init(&bus->rxctl_lock);
 	spin_lock_init(&bus->txq_lock);
@@ -4796,6 +4896,9 @@ void brcmf_sdio_remove(struct brcmf_sdio *bus)
 		}
 		if (bus->sdiodev->settings)
 			brcmf_release_module_param(bus->sdiodev->settings);
+#ifdef CPTCFG_BRCMFMAC_BT_SHARED_SDIO
+		brcmf_btsdio_detach(bus->sdiodev->bus_if);
+#endif /* CPTCFG_BRCMFMAC_BT_SHARED_SDIO */
 
 		kfree(bus->rxbuf);
 		kfree(bus->hdrbuf);

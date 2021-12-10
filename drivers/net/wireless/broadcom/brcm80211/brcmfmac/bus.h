@@ -8,6 +8,7 @@
 
 #include <linux/skbuff.h>
 #include "debug.h"
+#include <linux/version.h>
 
 /* IDs of the 6 default common rings of msgbuf protocol */
 #define BRCMF_H2D_MSGRING_CONTROL_SUBMIT	0
@@ -125,6 +126,19 @@ struct brcmf_bus_stats {
 };
 
 /**
+ * struct brcmf_bt_dev - bt shared SDIO device.
+ *
+ * @ bt_data: bt internal structure data
+ * @ bt_sdio_int_cb: bt registered interrupt callback function
+ * @ bt_use_count: Counter that tracks whether BT is using the bus
+ */
+struct brcmf_bt_dev {
+	void	*bt_data;
+	void	(*bt_sdio_int_cb)(void *data);
+	u32	use_count; /* Counter for tracking if BT is using the bus */
+};
+
+/**
  * struct brcmf_bus - interface structure between common and bus layer
  *
  * @bus_priv: pointer to private bus device.
@@ -139,6 +153,7 @@ struct brcmf_bus_stats {
  * @wowl_supported: is wowl supported by bus driver.
  * @chiprev: revision of the dongle chip.
  * @msgbuf: msgbuf protocol parameters provided by bus layer.
+ * @bt_dev: bt shared SDIO device
  */
 struct brcmf_bus {
 	union {
@@ -162,6 +177,9 @@ struct brcmf_bus {
 #if (LINUX_VERSION_CODE < KERNEL_VERSION(4, 16, 0))
 	bool allow_skborphan;
 #endif
+#ifdef CPTCFG_BRCMFMAC_BT_SHARED_SDIO
+	struct brcmf_bt_dev *bt_dev;
+#endif /* CPTCFG_BRCMFMAC_BT_SHARED_SDIO */
 };
 
 /*
@@ -259,7 +277,8 @@ int brcmf_bus_reset(struct brcmf_bus *bus)
  */
 
 /* Receive frame for delivery to OS.  Callee disposes of rxp. */
-void brcmf_rx_frame(struct device *dev, struct sk_buff *rxp, bool handle_event);
+void brcmf_rx_frame(struct device *dev, struct sk_buff *rxp, bool handle_event,
+		    bool inirq);
 /* Receive async event packet from firmware. Callee disposes of rxp. */
 void brcmf_rx_event(struct device *dev, struct sk_buff *rxp);
 
