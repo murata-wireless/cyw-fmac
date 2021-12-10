@@ -14,6 +14,7 @@
 #if LINUX_VERSION_IS_LESS(4,13,0)
 #define guid_t uuid_le
 #define uuid_t uuid_be
+#define GUID_INIT UUID_LE
 
 static inline void guid_gen(guid_t *u)
 {

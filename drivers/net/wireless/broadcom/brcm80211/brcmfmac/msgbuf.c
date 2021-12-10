@@ -386,7 +386,7 @@ brcmf_msgbuf_get_pktid(struct device *dev, struct brcmf_msgbuf_pktids *pktids,
 	struct brcmf_msgbuf_pktid *pktid;
 	struct sk_buff *skb;
 
-	if (idx < 0 || idx >= pktids->array_size) {
+	if (idx >= pktids->array_size) {
 		brcmf_err("Invalid packet id %d (max %d)\n", idx,
 			  pktids->array_size);
 		return NULL;
@@ -584,7 +584,8 @@ static int brcmf_msgbuf_hdrpull(struct brcmf_pub *drvr, bool do_fws,
 	return -ENODEV;
 }
 
-static void brcmf_msgbuf_rxreorder(struct brcmf_if *ifp, struct sk_buff *skb)
+static void brcmf_msgbuf_rxreorder(struct brcmf_if *ifp, struct sk_buff *skb,
+				   bool inirq)
 {
 }
 
@@ -1181,7 +1182,7 @@ static void brcmf_msgbuf_process_event(struct brcmf_msgbuf *msgbuf, void *buf)
 
 	skb->protocol = eth_type_trans(skb, ifp->ndev);
 
-	brcmf_fweh_process_skb(ifp->drvr, skb, 0);
+	brcmf_fweh_process_skb(ifp->drvr, skb, 0, GFP_KERNEL);
 
 exit:
 	brcmu_pkt_buf_free_skb(skb);
@@ -1272,7 +1273,7 @@ brcmf_msgbuf_process_rx_complete(struct brcmf_msgbuf *msgbuf, void *buf)
 		}
 	}
 	skb->protocol = eth_type_trans(skb, ifp->ndev);
-	brcmf_netif_rx(ifp, skb);
+	brcmf_netif_rx(ifp, skb, false);
 }
 
 static void brcmf_msgbuf_process_gen_status(struct brcmf_msgbuf *msgbuf,
@@ -1740,6 +1741,8 @@ fail:
 					  BRCMF_TX_IOCTL_MAX_MSG_SIZE,
 					  msgbuf->ioctbuf,
 					  msgbuf->ioctbuf_handle);
+		if (msgbuf->txflow_wq)
+			destroy_workqueue(msgbuf->txflow_wq);
 		kfree(msgbuf);
 	}
 	return -ENOMEM;

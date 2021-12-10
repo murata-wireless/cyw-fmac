@@ -108,15 +108,7 @@ begin:
 
 static u32 fq_flow_idx(struct fq *fq, struct sk_buff *skb)
 {
-#if LINUX_VERSION_IS_GEQ(5,3,10) || \
-    LINUX_VERSION_IN_RANGE(4,19,83, 4,20,0) || \
-    LINUX_VERSION_IN_RANGE(4,14,153, 4,15,0) || \
-    LINUX_VERSION_IN_RANGE(4,9,200, 4,10,0) || \
-    LINUX_VERSION_IN_RANGE(4,4,200, 4,5,0)
-	u32 hash = skb_get_hash_perturb(skb, &fq->perturbation);
-#else
-	u32 hash = skb_get_hash_perturb(skb, fq->perturbation);
-#endif
+	u32 hash = skb_get_hash(skb);
 
 	return reciprocal_scale(hash, fq->flows_cnt);
 }
@@ -316,7 +308,6 @@ static int fq_init(struct fq *fq, int flows_cnt)
 	INIT_LIST_HEAD(&fq->backlogs);
 	spin_lock_init(&fq->lock);
 	fq->flows_cnt = max_t(u32, flows_cnt, 1);
-	get_random_bytes(&fq->perturbation, sizeof(fq->perturbation));
 	fq->quantum = 300;
 	fq->limit = 8192;
 	fq->memory_limit = 16 << 20; /* 16 MBytes */
