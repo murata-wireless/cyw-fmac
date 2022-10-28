@@ -1596,7 +1596,7 @@ int __init brcmf_core_init(void)
 	return 0;
 }
 
-void __exit brcmf_core_exit(void)
+void brcmf_core_exit(void)
 {
 	cancel_work_sync(&brcmf_driver_work);
 
