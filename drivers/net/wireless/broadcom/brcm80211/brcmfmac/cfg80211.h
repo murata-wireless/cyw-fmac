@@ -101,6 +101,14 @@
 #define WL_WOWLAN_PKT_FILTER_ID_FIRST	201
 #define WL_WOWLAN_PKT_FILTER_ID_LAST	(WL_WOWLAN_PKT_FILTER_ID_FIRST + \
 					WL_WOWLAN_MAX_PATTERNS - 1)
+
+#define WL_RSPEC_ENCODE_HE	     0x03000000 /* HE MCS and Nss is stored in RSPEC_RATE_MASK */
+#define WL_RSPEC_HE_NSS_UNSPECIFIED	0xF
+#define WL_RSPEC_HE_NSS_SHIFT	     4               /* HE Nss value shift */
+#define WL_RSPEC_HE_GI_MASK	     0x00000C00      /* HE GI indices */
+#define WL_RSPEC_HE_GI_SHIFT	     10
+#define HE_GI_TO_RSPEC(gi)	     (((gi) << WL_RSPEC_HE_GI_SHIFT) & WL_RSPEC_HE_GI_MASK)
+
 /**
  * enum brcmf_scan_status - scan engine status
  *
@@ -246,6 +254,9 @@ struct vif_saved_ie {
  * @list: linked list.
  * @mgmt_rx_reg: registered rx mgmt frame types.
  * @mbss: Multiple BSS type, set if not first AP (not relevant for P2P).
+ * @cqm_rssi_low: Lower RSSI limit for CQM monitoring
+ * @cqm_rssi_high: Upper RSSI limit for CQM monitoring
+ * @cqm_rssi_last: Last RSSI reading for CQM monitoring
  */
 struct brcmf_cfg80211_vif {
 	struct brcmf_if *ifp;
@@ -260,6 +271,9 @@ struct brcmf_cfg80211_vif {
 	u16 mgmt_rx_reg;
 	bool mbss;
 	int is_11d;
+	s32 cqm_rssi_low;
+	s32 cqm_rssi_high;
+	s32 cqm_rssi_last;
 };
 
 /* association inform */
@@ -422,6 +436,12 @@ struct brcmf_tlv {
 	u8 id;
 	u8 len;
 	u8 data[1];
+};
+
+struct bcm_xtlv {
+	u16	id;
+	u16	len;
+	u8	data[1];
 };
 
 static inline struct wiphy *cfg_to_wiphy(struct brcmf_cfg80211_info *cfg)

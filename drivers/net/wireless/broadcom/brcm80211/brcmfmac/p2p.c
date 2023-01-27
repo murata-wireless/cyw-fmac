@@ -1265,7 +1265,6 @@ bool brcmf_p2p_scan_finding_common_channel(struct brcmf_cfg80211_info *cfg,
 {
 	struct brcmf_p2p_info *p2p = &cfg->p2p;
 	struct afx_hdl *afx_hdl = &p2p->afx_hdl;
-	struct brcmu_chan ch;
 	u8 *ie;
 	s32 err;
 	u8 p2p_dev_addr[ETH_ALEN];
@@ -2083,7 +2082,7 @@ static void brcmf_p2p_get_current_chanspec(struct brcmf_p2p_info *p2p,
 }
 
 /**
- * Change a P2P Role.
+ * brcmf_p2p_ifchange - Change a P2P Role.
  * @cfg: driver private data for cfg80211 interface.
  * @if_type: interface type.
  * Returns 0 if success.
@@ -2381,9 +2380,7 @@ struct wireless_dev *brcmf_p2p_add_vif(struct wiphy *wiphy, const char *name,
 	}
 
 	strncpy(ifp->ndev->name, name, sizeof(ifp->ndev->name) - 1);
-#if LINUX_VERSION_IS_GEQ(3,17,0)
 	ifp->ndev->name_assign_type = name_assign_type;
-#endif /* >= 3.17.0 */
 	err = brcmf_net_attach(ifp, true);
 	if (err) {
 		bphy_err(drvr, "Registering netdevice failed\n");
@@ -2482,7 +2479,7 @@ int brcmf_p2p_del_vif(struct wiphy *wiphy, struct wireless_dev *wdev)
 	return err;
 }
 
-void brcmf_p2p_ifp_removed(struct brcmf_if *ifp, bool rtnl_locked)
+void brcmf_p2p_ifp_removed(struct brcmf_if *ifp, bool locked)
 {
 	struct brcmf_cfg80211_info *cfg;
 	struct brcmf_cfg80211_vif *vif;
@@ -2491,11 +2488,15 @@ void brcmf_p2p_ifp_removed(struct brcmf_if *ifp, bool rtnl_locked)
 	vif = ifp->vif;
 	cfg = wdev_to_cfg(&vif->wdev);
 	cfg->p2p.bss_idx[P2PAPI_BSSCFG_DEVICE].vif = NULL;
-	if (!rtnl_locked)
+	if (!locked) {
 		rtnl_lock();
-	cfg80211_unregister_wdev(&vif->wdev);
-	if (!rtnl_locked)
+		wiphy_lock(cfg->wiphy);
+		cfg80211_unregister_wdev(&vif->wdev);
+		wiphy_unlock(cfg->wiphy);
 		rtnl_unlock();
+	} else {
+		cfg80211_unregister_wdev(&vif->wdev);
+	}
 	brcmf_free_vif(vif);
 }
 

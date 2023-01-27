@@ -580,7 +580,7 @@ enum brcmf_sdio_frmtype {
 	BRCMF_SDIO_FT_SUB,
 };
 
-#define SDIOD_DRVSTR_KEY(chip, pmu)     (((chip) << 16) | (pmu))
+#define SDIOD_DRVSTR_KEY(chip, pmu)     (((unsigned int)(chip) << 16) | (pmu))
 
 /* SDIO Pad drive strength to select value mappings */
 struct sdiod_drive_str {
@@ -640,6 +640,7 @@ CY_FW_DEF(4339, "cyfmac4339-sdio");
 BRCMF_FW_DEF(43430A0, "brcmfmac43430a0-sdio");
 /* Note the names are not postfixed with a1 for backward compatibility */
 CY_FW_DEF(43430A1, "cyfmac43430-sdio");
+BRCMF_FW_DEF(43430B0, "brcmfmac43430b0-sdio");
 CY_FW_DEF(43439, "cyfmac43439-sdio");
 CY_FW_DEF(43455, "cyfmac43455-sdio");
 BRCMF_FW_DEF(43456, "brcmfmac43456-sdio");
@@ -648,8 +649,15 @@ CY_FW_DEF(4356, "cyfmac4356-sdio");
 CY_FW_DEF(4359, "cyfmac4359-sdio");
 CY_FW_DEF(4373, "cyfmac4373-sdio");
 CY_FW_DEF(43012, "cyfmac43012-sdio");
+BRCMF_FW_CLM_DEF(43752, "brcmfmac43752-sdio");
 CY_FW_DEF(89459, "cyfmac54591-sdio");
 CY_FW_TRXSE_DEF(55572, "cyfmac55572-sdio");
+
+/* firmware config files */
+MODULE_FIRMWARE(BRCMF_FW_DEFAULT_PATH "brcmfmac*-sdio.*.txt");
+
+/* per-board firmware binaries */
+MODULE_FIRMWARE(BRCMF_FW_DEFAULT_PATH "brcmfmac*-sdio.*.bin");
 
 static const struct brcmf_firmware_mapping brcmf_sdio_fwnames[] = {
 	BRCMF_FW_ENTRY(BRCM_CC_43143_CHIP_ID, 0xFFFFFFFF, 43143),
@@ -666,6 +674,7 @@ static const struct brcmf_firmware_mapping brcmf_sdio_fwnames[] = {
 	BRCMF_FW_ENTRY(BRCM_CC_4339_CHIP_ID, 0xFFFFFFFF, 4339),
 	BRCMF_FW_ENTRY(BRCM_CC_43430_CHIP_ID, 0x00000001, 43430A0),
 	BRCMF_FW_ENTRY(BRCM_CC_43430_CHIP_ID, 0x0000001E, 43430A1),
+	BRCMF_FW_ENTRY(BRCM_CC_43430_CHIP_ID, 0xFFFFFFFC, 43430B0),
 	BRCMF_FW_ENTRY(BRCM_CC_43430_CHIP_ID, 0xFFFFFFE0, 43439),
 	BRCMF_FW_ENTRY(BRCM_CC_4345_CHIP_ID, 0x00000200, 43456),
 	BRCMF_FW_ENTRY(BRCM_CC_4345_CHIP_ID, 0xFFFFFDC0, 43455),
@@ -675,6 +684,7 @@ static const struct brcmf_firmware_mapping brcmf_sdio_fwnames[] = {
 	BRCMF_FW_ENTRY(CY_CC_43439_CHIP_ID, 0xFFFFFFFF, 43439),
 	BRCMF_FW_ENTRY(CY_CC_4373_CHIP_ID, 0xFFFFFFFF, 4373),
 	BRCMF_FW_ENTRY(CY_CC_43012_CHIP_ID, 0xFFFFFFFF, 43012),
+	BRCMF_FW_ENTRY(CY_CC_43752_CHIP_ID, 0xFFFFFFFF, 43752),
 	BRCMF_FW_ENTRY(CY_CC_89459_CHIP_ID, 0xFFFFFFFF, 89459),
 	BRCMF_FW_ENTRY(CY_CC_55572_CHIP_ID, 0xFFFFFFFF, 55572)
 };
@@ -1371,7 +1381,7 @@ static void brcmf_sdio_free_glom(struct brcmf_sdio *bus)
 	}
 }
 
-/**
+/*
  * brcmfmac sdio bus specific header
  * This is the lowest layer header wrapped on the packets transmitted between
  * host and WiFi dongle which contains information needed for SDIO core and
@@ -1424,7 +1434,7 @@ static void brcmf_sdio_free_glom(struct brcmf_sdio *bus)
 static inline u8 brcmf_sdio_getdatoffset(u8 *swheader)
 {
 	u32 hdrvalue;
-	hdrvalue = *(u32 *)swheader;
+	hdrvalue = le32_to_cpu(*(__le32 *)swheader);
 	return (u8)((hdrvalue & SDPCM_DOFFSET_MASK) >> SDPCM_DOFFSET_SHIFT);
 }
 
@@ -1433,7 +1443,7 @@ static inline bool brcmf_sdio_fromevntchan(u8 *swheader)
 	u32 hdrvalue;
 	u8 ret;
 
-	hdrvalue = *(u32 *)swheader;
+	hdrvalue = le32_to_cpu(*(__le32 *)swheader);
 	ret = (u8)((hdrvalue & SDPCM_CHANNEL_MASK) >> SDPCM_CHANNEL_SHIFT);
 
 	return (ret == SDPCM_EVENT_CHANNEL);
@@ -1604,13 +1614,20 @@ static u8 brcmf_sdio_rxglom(struct brcmf_sdio *bus, u8 rxseq)
 	/* If there's a descriptor, generate the packet chain */
 	if (bus->glomd) {
 		pfirst = pnext = NULL;
-		dlen = (u16) (bus->glomd->len);
-		dptr = bus->glomd->data;
-		if (!dlen || (dlen & 1)) {
-			brcmf_err("bad glomd len(%d), ignore descriptor\n",
-				  dlen);
+		/* it is a u32 len to u16 dlen, should have a sanity check here. */
+		if (bus->glomd->len <= 0xFFFF) {
+			dlen = (u16)(bus->glomd->len);
+			if (!dlen || (dlen & 1)) {
+				brcmf_err("bad glomd len(%d), ignore descriptor\n",
+					  dlen);
+				dlen = 0;
+			}
+		} else {
+			brcmf_err("overflowed glomd len(%d), ignore descriptor\n",
+				  bus->glomd->len);
 			dlen = 0;
 		}
+		dptr = bus->glomd->data;
 
 		for (totlen = num = 0; dlen; num++) {
 			/* Get (and move past) next length */
@@ -1676,6 +1693,7 @@ static u8 brcmf_sdio_rxglom(struct brcmf_sdio *bus, u8 rxseq)
 	/* Ok -- either we just generated a packet chain,
 		 or had one from before */
 	if (!skb_queue_empty(&bus->glom)) {
+		u32 len_glom = 0;
 		if (BRCMF_GLOM_ON()) {
 			brcmf_dbg(GLOM, "try superframe read, packet chain:\n");
 			skb_queue_walk(&bus->glom, pnext) {
@@ -1686,7 +1704,14 @@ static u8 brcmf_sdio_rxglom(struct brcmf_sdio *bus, u8 rxseq)
 		}
 
 		pfirst = skb_peek(&bus->glom);
-		dlen = (u16) brcmf_sdio_glom_len(bus);
+		len_glom = brcmf_sdio_glom_len(bus);
+		if (len_glom > 0xFFFF) {
+			brcmf_err("glom_len is %d bytes, overflowed\n",
+				  len_glom);
+			goto frame_error_handle;
+		} else {
+			dlen = (u16)len_glom;
+		}
 
 		/* Do an SDIO read for the superframe.  Configurable iovar to
 		 * read directly into the chained packet, or allocate a large
@@ -1702,13 +1727,7 @@ static u8 brcmf_sdio_rxglom(struct brcmf_sdio *bus, u8 rxseq)
 		if (errcode < 0) {
 			brcmf_err("glom read of %d bytes failed: %d\n",
 				  dlen, errcode);
-
-			sdio_claim_host(bus->sdiodev->func1);
-			brcmf_sdio_rxfail(bus, true, false);
-			bus->sdcnt.rxglomfail++;
-			brcmf_sdio_free_glom(bus);
-			sdio_release_host(bus->sdiodev->func1);
-			return 0;
+			goto frame_error_handle;
 		}
 
 		brcmf_dbg_hex_dump(BRCMF_GLOM_ON(),
@@ -1745,16 +1764,9 @@ static u8 brcmf_sdio_rxglom(struct brcmf_sdio *bus, u8 rxseq)
 			num++;
 		}
 
-		if (errcode) {
-			/* Terminate frame on error */
-			sdio_claim_host(bus->sdiodev->func1);
-			brcmf_sdio_rxfail(bus, true, false);
-			bus->sdcnt.rxglomfail++;
-			brcmf_sdio_free_glom(bus);
-			sdio_release_host(bus->sdiodev->func1);
-			bus->cur_read.len = 0;
-			return 0;
-		}
+		/* Terminate frame on error */
+		if (errcode)
+			goto frame_error_handle;
 
 		/* Basic SD framing looks ok - process each packet (header) */
 
@@ -1795,6 +1807,16 @@ static u8 brcmf_sdio_rxglom(struct brcmf_sdio *bus, u8 rxseq)
 		bus->sdcnt.rxglomframes++;
 	}
 	return num;
+
+frame_error_handle:
+	sdio_claim_host(bus->sdiodev->func1);
+	brcmf_sdio_rxfail(bus, true, false);
+	bus->sdcnt.rxglomfail++;
+	brcmf_sdio_free_glom(bus);
+	sdio_release_host(bus->sdiodev->func1);
+	bus->cur_read.len = 0;
+
+	return 0;
 }
 
 static int brcmf_sdio_dcmd_resp_wait(struct brcmf_sdio *bus, uint *condition,
@@ -3733,6 +3755,7 @@ err:
 static bool brcmf_sdio_aos_no_decode(struct brcmf_sdio *bus)
 {
 	if (bus->ci->chip == CY_CC_43012_CHIP_ID ||
+	    bus->ci->chip == CY_CC_43752_CHIP_ID ||
 	    bus->ci->chip == CY_CC_4373_CHIP_ID ||
 	    bus->ci->chip == CY_CC_55572_CHIP_ID ||
 	    bus->ci->chip == BRCM_CC_4339_CHIP_ID ||
@@ -3844,6 +3867,7 @@ static int brcmf_sdio_bus_preinit(struct device *dev)
 	struct brcmf_sdio *bus = sdiodev->bus;
 	struct brcmf_core *core = bus->sdio_core;
 	u32 value;
+	__le32 iovar;
 	int err;
 
 	/* maxctl provided by common layer */
@@ -3864,16 +3888,16 @@ static int brcmf_sdio_bus_preinit(struct device *dev)
 	 */
 	if (core->rev < 12) {
 		/* for sdio core rev < 12, disable txgloming */
-		value = 0;
-		err = brcmf_iovar_data_set(dev, "bus:txglom", &value,
-					   sizeof(u32));
+		iovar = 0;
+		err = brcmf_iovar_data_set(dev, "bus:txglom", &iovar,
+					   sizeof(iovar));
 	} else {
 		/* otherwise, set txglomalign */
 		value = sdiodev->settings->bus.sdio.sd_sgentry_align;
 		/* SDIO ADMA requires at least 32 bit alignment */
-		value = max_t(u32, value, ALIGNMENT);
-		err = brcmf_iovar_data_set(dev, "bus:txglomalign", &value,
-					   sizeof(u32));
+		iovar = cpu_to_le32(max_t(u32, value, ALIGNMENT));
+		err = brcmf_iovar_data_set(dev, "bus:txglomalign", &iovar,
+					   sizeof(iovar));
 	}
 
 	if (err < 0)
@@ -3886,9 +3910,9 @@ static int brcmf_sdio_bus_preinit(struct device *dev)
 	bus->tx_hdrlen = SDPCM_HWHDR_LEN + SDPCM_SWHDR_LEN;
 	if (sdiodev->sg_support) {
 		bus->txglom = false;
-		value = 1;
+		iovar = cpu_to_le32(1);
 		err = brcmf_iovar_data_set(bus->sdiodev->dev, "bus:rxglom",
-					   &value, sizeof(u32));
+					   &iovar, sizeof(iovar));
 		if (err < 0) {
 			/* bus:rxglom is allowed to fail */
 			err = 0;
@@ -4248,7 +4272,7 @@ static u32 brcmf_sdio_buscore_read32(void *ctx, u32 addr)
 	 * It can be identified as 4339 by looking at the chip revision. It
 	 * is corrected here so the chip.c module has the right info.
 	 */
-	if (addr == CORE_CC_REG(SI_ENUM_BASE, chipid) &&
+	if (addr == CORE_CC_REG(SI_ENUM_BASE_DEFAULT, chipid) &&
 	    (sdiodev->func1->device == SDIO_DEVICE_ID_BROADCOM_4339 ||
 	     sdiodev->func1->device == SDIO_DEVICE_ID_BROADCOM_4335_4339)) {
 		rev = (val & CID_REV_MASK) >> CID_REV_SHIFT;
@@ -4312,12 +4336,15 @@ brcmf_sdio_probe_attach(struct brcmf_sdio *bus)
 	int reg_addr;
 	u32 reg_val;
 	u32 drivestrength;
+	u32 enum_base;
 
 	sdiodev = bus->sdiodev;
 	sdio_claim_host(sdiodev->func1);
 
-	pr_debug("F1 signature read @0x18000000=0x%4x\n",
-		 brcmf_sdiod_readl(sdiodev, SI_ENUM_BASE, NULL));
+	enum_base = brcmf_chip_enum_base(sdiodev->func1->device);
+
+	pr_debug("F1 signature read @0x%08x=0x%4x\n", enum_base,
+		 brcmf_sdiod_readl(sdiodev, enum_base, NULL));
 
 	/*
 	 * Force PLL off until brcmf_chip_attach()
@@ -4336,7 +4363,8 @@ brcmf_sdio_probe_attach(struct brcmf_sdio *bus)
 		goto fail;
 	}
 
-	bus->ci = brcmf_chip_attach(sdiodev, &brcmf_sdio_buscore_ops);
+	bus->ci = brcmf_chip_attach(sdiodev, sdiodev->func1->device,
+				    &brcmf_sdio_buscore_ops);
 	if (IS_ERR(bus->ci)) {
 		brcmf_err("brcmf_chip_attach failed!\n");
 		bus->ci = NULL;
@@ -4535,7 +4563,6 @@ static int brcmf_sdio_bus_reset(struct device *dev)
 	if (ret) {
 		brcmf_err("Failed to probe after sdio device reset: ret %d\n",
 			  ret);
-		brcmf_sdiod_remove(sdiodev);
 	}
 
 	return ret;
@@ -4628,6 +4655,7 @@ static void brcmf_sdio_firmware_callback(struct device *dev, int err,
 
 		switch (sdiod->func1->device) {
 		case SDIO_DEVICE_ID_BROADCOM_CYPRESS_4373:
+		case SDIO_DEVICE_ID_BROADCOM_CYPRESS_43752:
 			brcmf_dbg(INFO, "set F2 watermark to 0x%x*4 bytes\n",
 				  CY_4373_F2_WATERMARK);
 			brcmf_sdiod_writeb(sdiod, SBSDIO_WATERMARK,

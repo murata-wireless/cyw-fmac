@@ -61,6 +61,10 @@ void __brcmf_err(struct brcmf_bus *bus, const char *func, const char *fmt, ...);
 				  ##__VA_ARGS__);			\
 	} while (0)
 
+#define bphy_info_once(drvr, fmt, ...)					\
+	wiphy_info_once((drvr)->wiphy, "%s: " fmt, __func__,		\
+			##__VA_ARGS__)
+
 #if defined(DEBUG) || defined(CPTCFG_BRCM_TRACING)
 
 /* For debug/tracing purposes treat info messages as errors */
@@ -117,7 +121,6 @@ do {									\
 
 extern int brcmf_msg_level;
 
-struct brcmf_bus;
 struct brcmf_pub;
 #ifdef DEBUG
 struct dentry *brcmf_debugfs_get_devdir(struct brcmf_pub *drvr);

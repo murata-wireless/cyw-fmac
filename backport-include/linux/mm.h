@@ -7,11 +7,6 @@
 #include <linux/vmalloc.h>
 #include <linux/slab.h>
 
-#if LINUX_VERSION_IS_LESS(3,15,0)
-#define kvfree LINUX_BACKPORT(kvfree)
-void kvfree(const void *addr);
-#endif /* < 3.15 */
-
 #if LINUX_VERSION_IS_LESS(4,12,0)
 #define kvmalloc LINUX_BACKPORT(kvmalloc)
 static inline void *kvmalloc(size_t size, gfp_t flags)

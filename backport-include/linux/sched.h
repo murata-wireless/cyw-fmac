@@ -4,6 +4,11 @@
 #include_next <linux/sched.h>
 #include <linux/version.h>
 
+/* kcov was added in 4.6 and is included since then */
+#if LINUX_VERSION_IS_LESS(4,6,0)
+#include <linux/kcov.h>
+#endif
+
 #if LINUX_VERSION_IS_LESS(5,9,0)
 #if LINUX_VERSION_IS_GEQ(4,11,0)
 #include <uapi/linux/sched/types.h>

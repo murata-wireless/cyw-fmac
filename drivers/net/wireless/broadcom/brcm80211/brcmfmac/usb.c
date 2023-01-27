@@ -1594,9 +1594,7 @@ static struct usb_driver brcmf_usbdrvr = {
 	.resume = brcmf_usb_resume,
 	.reset_resume = brcmf_usb_reset_resume,
 	.supports_autosuspend = true,
-#if LINUX_VERSION_IS_GEQ(3,5,0)
 	.disable_hub_initiated_lpm = 1,
-#endif
 };
 
 static int brcmf_usb_reset_device(struct device *dev, void *notused)
@@ -1622,12 +1620,8 @@ void brcmf_usb_exit(void)
 	usb_deregister(&brcmf_usbdrvr);
 }
 
-void brcmf_usb_register(void)
+int brcmf_usb_register(void)
 {
-	int ret;
-
 	brcmf_dbg(USB, "Enter\n");
-	ret = usb_register(&brcmf_usbdrvr);
-	if (ret)
-		brcmf_err("usb_register failed %d\n", ret);
+	return usb_register(&brcmf_usbdrvr);
 }

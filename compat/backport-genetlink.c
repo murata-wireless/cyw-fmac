@@ -17,10 +17,10 @@
 #include <net/netlink.h>
 #include <net/sock.h>
 
-static const struct genl_family *find_family_real_ops(__genl_const struct genl_ops **ops)
+static const struct genl_family *find_family_real_ops(const struct genl_ops **ops)
 {
 	const struct genl_family *family;
-	__genl_const struct genl_ops *tmp_ops = *ops;
+	const struct genl_ops *tmp_ops = *ops;
 
 	/* find the family ... */
 	while (tmp_ops->doit || tmp_ops->dumpit)
@@ -86,11 +86,11 @@ static void extack_netlink_ack(struct sk_buff *in_skb, struct nlmsghdr *nlh,
 	skb = nlmsg_new(payload + tlvlen, GFP_KERNEL);
 	if (!skb) {
 		NETLINK_CB(in_skb).sk->sk_err = ENOBUFS;
-		NETLINK_CB(in_skb).sk->sk_error_report(NETLINK_CB(in_skb).sk);
+		sk_error_report(NETLINK_CB(in_skb).sk);
 		return;
 	}
 
-	rep = __nlmsg_put(skb, NETLINK_CB_PORTID(in_skb), nlh->nlmsg_seq,
+	rep = __nlmsg_put(skb, NETLINK_CB(in_skb).portid, nlh->nlmsg_seq,
 			  NLMSG_ERROR, payload, flags);
 	errmsg = nlmsg_data(rep);
 	errmsg->error = err;
@@ -119,8 +119,7 @@ static void extack_netlink_ack(struct sk_buff *in_skb, struct nlmsghdr *nlh,
 
 	nlmsg_end(skb, rep);
 
-	netlink_unicast(in_skb->sk, skb, NETLINK_CB_PORTID(in_skb),
-			MSG_DONTWAIT);
+	netlink_unicast(in_skb->sk, skb, NETLINK_CB(in_skb).portid, MSG_DONTWAIT);
 }
 
 static int extack_doit(struct sk_buff *skb, struct genl_info *info)
@@ -149,7 +148,7 @@ static int extack_doit(struct sk_buff *skb, struct genl_info *info)
 }
 #endif /* LINUX_VERSION_IS_LESS(4,12,0) */
 
-static int backport_pre_doit(__genl_const struct genl_ops *ops,
+static int backport_pre_doit(const struct genl_ops *ops,
 			     struct sk_buff *skb,
 			     struct genl_info *info)
 {
@@ -199,7 +198,7 @@ static int backport_pre_doit(__genl_const struct genl_ops *ops,
 	return err;
 }
 
-static void backport_post_doit(__genl_const struct genl_ops *ops,
+static void backport_post_doit(const struct genl_ops *ops,
 			       struct sk_buff *skb,
 			       struct genl_info *info)
 {
@@ -257,23 +256,17 @@ int backport_genl_register_family(struct genl_family *family)
 	COPY(version);
 	COPY(maxattr);
 	COPY(netnsok);
-#if LINUX_VERSION_IS_GEQ(3,10,0)
 	COPY(parallel_ops);
-#endif
 	/* The casts are OK - we checked everything is the same offset in genl_ops */
 	family->family.pre_doit = (void *)backport_pre_doit;
 	family->family.post_doit = (void *)backport_post_doit;
 	/* attrbuf is output only */
 	family->copy_ops = (void *)ops;
-#if LINUX_VERSION_IS_GEQ(3,13,0)
 	family->family.ops = (void *)ops;
 	COPY(mcgrps);
 	COPY(n_ops);
 	COPY(n_mcgrps);
-#endif
-#if LINUX_VERSION_IS_GEQ(3,11,0)
 	COPY(module);
-#endif
 
 	err = __real_backport_genl_register_family(&family->family);
 
@@ -283,27 +276,7 @@ int backport_genl_register_family(struct genl_family *family)
 	if (err)
 		return err;
 
-#if LINUX_VERSION_IS_GEQ(3,13,0) || RHEL_RELEASE_CODE >= RHEL_RELEASE_VERSION(7,0)
 	return 0;
-#else
-	for (i = 0; i < family->n_ops; i++) {
-		err = genl_register_ops(&family->family, ops + i);
-		if (err < 0)
-			goto error;
-	}
-
-	for (i = 0; i < family->n_mcgrps; i++) {
-		err = genl_register_mc_group(&family->family,
-					     &family->mcgrps[i]);
-		if (err)
-			goto error;
-	}
-
-	return 0;
- error:
-	genl_unregister_family(family);
-	return err;
-#endif /* LINUX_VERSION_IS_GEQ(3,13,0) || RHEL_RELEASE_CODE >= RHEL_RELEASE_VERSION(7,0) */
 }
 EXPORT_SYMBOL_GPL(backport_genl_register_family);
 
@@ -320,11 +293,7 @@ static u32 __backport_genl_group(const struct genl_family *family,
 {
 	if (WARN_ON_ONCE(group >= family->n_mcgrps))
 		return INVALID_GROUP;
-#if LINUX_VERSION_IS_LESS(3,13,0)
-	return family->mcgrps[group].id;
-#else
 	return family->family.mcgrp_offset + group;
-#endif
 }
 
 void genl_notify(const struct genl_family *family, struct sk_buff *skb,
@@ -340,8 +309,7 @@ void genl_notify(const struct genl_family *family, struct sk_buff *skb,
 	group = __backport_genl_group(family, group);
 	if (group == INVALID_GROUP)
 		return;
-	nlmsg_notify(sk, skb, genl_info_snd_portid(info), group, report,
-		     flags);
+	nlmsg_notify(sk, skb, info->snd_portid, group, report, flags);
 }
 EXPORT_SYMBOL_GPL(genl_notify);
 
@@ -370,8 +338,7 @@ void *genlmsg_put_reply(struct sk_buff *skb,
 			const struct genl_family *family,
 			int flags, u8 cmd)
 {
-	return genlmsg_put(skb, genl_info_snd_portid(info), info->snd_seq,
-			   family,
+	return genlmsg_put(skb, info->snd_portid, info->snd_seq, family,
 			   flags, cmd);
 }
 EXPORT_SYMBOL_GPL(genlmsg_put_reply);

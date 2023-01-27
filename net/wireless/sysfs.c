@@ -5,6 +5,7 @@
  *
  * Copyright 2005-2006	Jiri Benc <jbenc@suse.cz>
  * Copyright 2006	Johannes Berg <johannes@sipsolutions.net>
+ * Copyright (C) 2020-2021 Intel Corporation
  */
 
 #include <linux/device.h>
@@ -81,12 +82,6 @@ static void wiphy_dev_release(struct device *dev)
 	cfg80211_dev_free(rdev);
 }
 
-static int wiphy_uevent(struct device *dev, struct kobj_uevent_env *env)
-{
-	/* TODO, we probably need stuff here */
-	return 0;
-}
-
 #ifdef CONFIG_PM_SLEEP
 static void cfg80211_leave_all(struct cfg80211_registered_device *rdev)
 {
@@ -101,9 +96,14 @@ static int wiphy_suspend(struct device *dev)
 	struct cfg80211_registered_device *rdev = dev_to_rdev(dev);
 	int ret = 0;
 
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(4, 18, 0))
 	rdev->suspend_at = get_seconds();
+#else
+	rdev->suspend_at = ktime_get_boottime_seconds();
+#endif
 
 	rtnl_lock();
+	wiphy_lock(&rdev->wiphy);
 	if (rdev->wiphy.registered) {
 		if (!rdev->wiphy.wowlan_config) {
 			cfg80211_leave_all(rdev);
@@ -118,6 +118,7 @@ static int wiphy_suspend(struct device *dev)
 			ret = rdev_suspend(rdev, NULL);
 		}
 	}
+	wiphy_unlock(&rdev->wiphy);
 	rtnl_unlock();
 
 	return ret;
@@ -129,11 +130,21 @@ static int wiphy_resume(struct device *dev)
 	int ret = 0;
 
 	/* Age scan results with time spent in suspend */
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(4, 18, 0))
 	cfg80211_bss_age(rdev, get_seconds() - rdev->suspend_at);
+#else
+	cfg80211_bss_age(rdev, ktime_get_boottime_seconds() - rdev->suspend_at);
+#endif
 
 	rtnl_lock();
+	wiphy_lock(&rdev->wiphy);
 	if (rdev->wiphy.registered && rdev->ops->resume)
 		ret = rdev_resume(rdev);
+	wiphy_unlock(&rdev->wiphy);
+
+	if (ret)
+		cfg80211_shutdown_all_interfaces(&rdev->wiphy);
+
 	rtnl_unlock();
 
 	return ret;
@@ -157,7 +168,6 @@ struct class ieee80211_class = {
 	.owner = THIS_MODULE,
 	.dev_release = wiphy_dev_release,
 	.dev_groups = ieee80211_groups,
-	.dev_uevent = wiphy_uevent,
 	.pm = WIPHY_PM_OPS,
 	.ns_type = &net_ns_type_operations,
 	.namespace = wiphy_namespace,

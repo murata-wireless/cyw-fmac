@@ -4,7 +4,6 @@
 #include <linux/gpio.h>
 
 #ifdef CONFIG_GPIOLIB
-#if LINUX_VERSION_IS_GEQ(3,17,0)
 #include <linux/gpio/driver.h>
 #include <linux/gpio/consumer.h>
 #include <linux/gpio/machine.h>
@@ -84,5 +83,4 @@ struct gpio_desc *backport_gpiochip_request_own_desc(struct gpio_chip *gc,
 	return desc;
 }
 EXPORT_SYMBOL_GPL(backport_gpiochip_request_own_desc);
-#endif /* > 3.17 */
 #endif /* CONFIG_GPIOLIB */

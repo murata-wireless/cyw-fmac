@@ -2,7 +2,6 @@
 #include <linux/init.h>
 #include <linux/pm_qos.h>
 #include <linux/workqueue.h>
-#include "backports.h"
 
 MODULE_AUTHOR("Luis R. Rodriguez");
 MODULE_DESCRIPTION("Kernel backport module");
@@ -53,10 +52,6 @@ EXPORT_SYMBOL_GPL(backport_dependency_symbol);
 
 static int __init backport_init(void)
 {
-	int ret = devcoredump_init();
-	if (ret)
-		return ret;
-
 	printk(KERN_INFO "Loading modules backported from " CPTCFG_KERNEL_NAME
 #ifndef BACKPORTS_GIT_TRACKED
 		" version " CPTCFG_KERNEL_VERSION
@@ -78,8 +73,8 @@ static int __init backport_init(void)
 }
 subsys_initcall(backport_init);
 
+
 static void __exit backport_exit(void)
 {
-	devcoredump_exit();
 }
 module_exit(backport_exit);

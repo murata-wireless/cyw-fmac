@@ -745,7 +745,7 @@ brcmf_fws_macdesc_lookup(struct brcmf_fws_info *fws, u8 *ea)
 static struct brcmf_fws_mac_descriptor*
 brcmf_fws_macdesc_find(struct brcmf_fws_info *fws, struct brcmf_if *ifp, u8 *da)
 {
-	struct brcmf_fws_mac_descriptor *entry = &fws->desc.other;
+	struct brcmf_fws_mac_descriptor *entry;
 	bool multicast;
 
 	multicast = is_multicast_ether_addr(da);
@@ -1847,7 +1847,7 @@ void brcmf_fws_hdrpull(struct brcmf_if *ifp, s16 siglen, struct sk_buff *skb)
 	u8 *signal_data;
 	s16 data_len;
 	u8 type;
-	u8 len;
+	s16 len;
 	u8 *data;
 	s32 status;
 	s32 err;
