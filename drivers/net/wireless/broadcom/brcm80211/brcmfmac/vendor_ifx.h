@@ -73,8 +73,34 @@ enum ifx_nl80211_vendor_subcmds {
 	 * @IFX_VENDOR_SCMD_DCMD: equivilent to SCMD_PRIV_STR in DHD.
 	 *
 	 * @IFX_VENDOR_SCMD_FRAMEBURST: align ID to DHD.
+	 *
+	 * @IFX_VENDOR_SCMD_MUEDCA_OPT_ENABLE: Vendor command to enable/disable HE MU-EDCA opt.
+	 *
+	 * @IFX_VENDOR_SCMD_LDPC_CAP: Vendor command enable/disable LDPC Capability.
+	 *
+	 * @IFX_VENDOR_SCMD_AMSDU: Vendor command to enable/disable AMSDU on all the TID queues.
+	 *
+	 * @IFX_VENDOR_SCMD_TWT: Vendor subcommand to configure TWT.
+	 *	Uses attributes defined in enum ifx_vendor_attr_twt.
+	 *
+	 * @IFX_VENDOR_SCMD_OCE_ENABLE: Vendor command to enable/disable OCE Capability.
+	 *
+	 * @IFX_VENDOR_SCMD_BSS_COLOR: Vendor command to get BSSCOLOR value.
+	 *
+	 * @IFX_VENDOR_SCMD_RANDMAC: Vendor command to enable/disable RANDMAC Capability.
+	 *
+	 * @IFX_VENDOR_SCMD_MBO: Vendor subcommand to configure MBO.
+	 *      Uses attributes defined in enum ifx_vendor_attr_mbo.
+	 *
+	 * @IFX_VENDOR_SCMD_MPC: Vendor command to set/get MPC setting.
+	 *
+	 * @IFX_VENDOR_SCMD_GIANTRX: Vendor command to set/get GIANTRX setting.
+	 *
+	 * @IFX_VENDOR_SCMD_MAX: This acts as a the tail of cmds list.
+	 *      Make sure it located at the end of the list.
 	 */
 	/* Reserved 2-5 */
+
 	SCMD(UNSPEC)		= 0,
 	SCMD(DCMD)		= 1,
 	SCMD(RSV2)		= 2,
@@ -93,7 +119,10 @@ enum ifx_nl80211_vendor_subcmds {
 	SCMD(OCE_ENABLE)	= 15,
 	SCMD(BSSCOLOR)		= 16,
 	SCMD(RANDMAC)		= 17,
-	SCMD(MAX)		= 18
+	SCMD(MBO)		= 18,
+	SCMD(MPC)		= 19,
+	SCMD(GIANTRX)		= 20,
+	SCMD(MAX)		= 21
 };
 
 /* enum ifx_vendor_attr - IFX nl80211 vendor attributes
@@ -111,6 +140,97 @@ enum ifx_vendor_attr {
 	IFX_VENDOR_ATTR_UNSPEC		= 0,
 	/* Reserved 1-10 */
 	IFX_VENDOR_ATTR_MAX		= 11
+};
+
+#define IFX_MBO_IOV_MAJOR_VER 1
+#define IFX_MBO_IOV_MINOR_VER 1
+#define IFX_MBO_IOV_MAJOR_VER_SHIFT 8
+#define IFX_MBO_IOV_VERSION \
+	((IFX_MBO_IOV_MAJOR_VER << IFX_MBO_IOV_MAJOR_VER_SHIFT) | \
+	  IFX_MBO_IOV_MINOR_VER)
+
+enum ifx_vendor_attr_mbo_param {
+	IFX_VENDOR_ATTR_MBO_PARAM_UNSPEC = 0,
+	IFX_VENDOR_ATTR_MBO_PARAM_OPCLASS = 1,
+	IFX_VENDOR_ATTR_MBO_PARAM_CHAN = 2,
+	IFX_VENDOR_ATTR_MBO_PARAM_PREFERENCE = 3,
+	IFX_VENDOR_ATTR_MBO_PARAM_REASON_CODE = 4,
+	IFX_VENDOR_ATTR_MBO_PARAM_CELL_DATA_CAP = 5,
+	IFX_VENDOR_ATTR_MBO_PARAM_COUNTERS = 6,
+	IFX_VENDOR_ATTR_MBO_PARAM_ENABLE = 7,
+	IFX_VENDOR_ATTR_MBO_PARAM_SUB_ELEM_TYPE = 8,
+	IFX_VENDOR_ATTR_MBO_PARAM_BTQ_TRIG_START_OFFSET = 9,
+	IFX_VENDOR_ATTR_MBO_PARAM_BTQ_TRIG_RSSI_DELTA = 10,
+	IFX_VENDOR_ATTR_MBO_PARAM_ANQP_CELL_SUPP = 11,
+	IFX_VENDOR_ATTR_MBO_PARAM_BIT_MASK = 12,
+	IFX_VENDOR_ATTR_MBO_PARAM_ASSOC_DISALLOWED = 13,
+	IFX_VENDOR_ATTR_MBO_PARAM_CELLULAR_DATA_PREF = 14,
+	IFX_VENDOR_ATTR_MBO_PARAM_MAX = 15
+};
+
+static const struct nla_policy
+ifx_vendor_attr_mbo_param_policy[IFX_VENDOR_ATTR_MBO_PARAM_MAX + 1] = {
+	[IFX_VENDOR_ATTR_MBO_PARAM_UNSPEC] = {.type = NLA_U8},
+	[IFX_VENDOR_ATTR_MBO_PARAM_OPCLASS] = {.type = NLA_U8},
+	[IFX_VENDOR_ATTR_MBO_PARAM_CHAN] = {.type = NLA_U8},
+	[IFX_VENDOR_ATTR_MBO_PARAM_PREFERENCE] = {.type = NLA_U8},
+	[IFX_VENDOR_ATTR_MBO_PARAM_REASON_CODE] = {.type = NLA_U8},
+	[IFX_VENDOR_ATTR_MBO_PARAM_CELL_DATA_CAP] = {.type = NLA_U8},
+	[IFX_VENDOR_ATTR_MBO_PARAM_COUNTERS] = {.type = NLA_U8},
+	[IFX_VENDOR_ATTR_MBO_PARAM_ENABLE] = {.type = NLA_U8},
+	[IFX_VENDOR_ATTR_MBO_PARAM_SUB_ELEM_TYPE] = {.type = NLA_U8},
+	[IFX_VENDOR_ATTR_MBO_PARAM_BTQ_TRIG_START_OFFSET] = {.type = NLA_U8},
+	[IFX_VENDOR_ATTR_MBO_PARAM_BTQ_TRIG_RSSI_DELTA] = {.type = NLA_U8},
+	[IFX_VENDOR_ATTR_MBO_PARAM_ANQP_CELL_SUPP] = {.type = NLA_U8},
+	[IFX_VENDOR_ATTR_MBO_PARAM_BIT_MASK] = {.type = NLA_U8},
+	[IFX_VENDOR_ATTR_MBO_PARAM_ASSOC_DISALLOWED] = {.type = NLA_U8},
+	[IFX_VENDOR_ATTR_MBO_PARAM_CELLULAR_DATA_PREF] = {.type = NLA_U8},
+	[IFX_VENDOR_ATTR_MBO_PARAM_MAX] = {.type = NLA_U8},
+};
+
+enum ifx_vendor_attr_mbo {
+	IFX_VENDOR_ATTR_MBO_UNSPEC,
+	IFX_VENDOR_ATTR_MBO_CMD,
+	IFX_VENDOR_ATTR_MBO_PARAMS,
+	IFX_VENDOR_ATTR_MBO_MAX
+};
+
+static const struct nla_policy ifx_vendor_attr_mbo_policy[IFX_VENDOR_ATTR_MBO_MAX + 1] = {
+	[IFX_VENDOR_ATTR_MBO_UNSPEC] = {.type = NLA_U8},
+	[IFX_VENDOR_ATTR_MBO_CMD] = {.type = NLA_U8},
+	[IFX_VENDOR_ATTR_MBO_PARAMS] =
+		NLA_POLICY_NESTED(ifx_vendor_attr_mbo_param_policy),
+	[IFX_VENDOR_ATTR_MBO_MAX] = {.type = NLA_U8},
+};
+
+enum {
+	IFX_MBO_CMD_ADD_CHAN_PREF = 1,
+	IFX_MBO_CMD_DEL_CHAN_PREF = 2,
+	IFX_MBO_CMD_LIST_CHAN_PREF = 3,
+	IFX_MBO_CMD_CELLULAR_DATA_CAP = 4,
+	IFX_MBO_CMD_DUMP_COUNTERS = 5,
+	IFX_MBO_CMD_CLEAR_COUNTERS = 6,
+	IFX_MBO_CMD_FORCE_ASSOC = 7,
+	IFX_MBO_CMD_BSSTRANS_REJECT = 8,
+	IFX_MBO_CMD_SEND_NOTIF = 9,
+	IFX_MBO_CMD_LAST
+};
+
+enum {
+	IFX_MBO_XTLV_OPCLASS            = 0x1,
+	IFX_MBO_XTLV_CHAN               = 0x2,
+	IFX_MBO_XTLV_PREFERENCE         = 0x3,
+	IFX_MBO_XTLV_REASON_CODE        = 0x4,
+	IFX_MBO_XTLV_CELL_DATA_CAP      = 0x5,
+	IFX_MBO_XTLV_COUNTERS           = 0x6,
+	IFX_MBO_XTLV_ENABLE             = 0x7,
+	IFX_MBO_XTLV_SUB_ELEM_TYPE      = 0x8,
+	IFX_MBO_XTLV_BTQ_TRIG_START_OFFSET = 0x9,
+	IFX_MBO_XTLV_BTQ_TRIG_RSSI_DELTA = 0xa,
+	IFX_MBO_XTLV_ANQP_CELL_SUPP      = 0xb,
+	IFX_MBO_XTLV_BIT_MASK		= 0xc,
+	IFX_MBO_XTLV_ASSOC_DISALLOWED	= 0xd,
+	IFX_MBO_XTLV_CELLULAR_DATA_PREF = 0xe
 };
 
 /* TWT define/enum/struct
@@ -548,6 +668,15 @@ int ifx_cfg80211_vndr_cmds_oce_enable(struct wiphy *wiphy,
 				      struct wireless_dev *wdev,
 				      const void *data, int len);
 int ifx_cfg80211_vndr_cmds_randmac(struct wiphy *wiphy,
+				   struct wireless_dev *wdev,
+				   const void *data, int len);
+int ifx_cfg80211_vndr_cmds_mbo(struct wiphy *wiphy,
+			       struct wireless_dev *wdev,
+			       const void *data, int len);
+int ifx_cfg80211_vndr_cmds_mpc(struct wiphy *wiphy,
+			       struct wireless_dev *wdev,
+			       const void *data, int len);
+int ifx_cfg80211_vndr_cmds_giantrx(struct wiphy *wiphy,
 				   struct wireless_dev *wdev,
 				   const void *data, int len);
 
