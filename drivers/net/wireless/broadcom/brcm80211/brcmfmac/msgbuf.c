@@ -584,8 +584,7 @@ static int brcmf_msgbuf_hdrpull(struct brcmf_pub *drvr, bool do_fws,
 	return -ENODEV;
 }
 
-static void brcmf_msgbuf_rxreorder(struct brcmf_if *ifp, struct sk_buff *skb,
-				   bool inirq)
+static void brcmf_msgbuf_rxreorder(struct brcmf_if *ifp, struct sk_buff *skb)
 {
 }
 
@@ -973,7 +972,7 @@ static u32 brcmf_msgbuf_rxbuf_data_post(struct brcmf_msgbuf *msgbuf, u32 count)
 		rx_bufpost = (struct msgbuf_rx_bufpost *)ret_ptr;
 		memset(rx_bufpost, 0, sizeof(*rx_bufpost));
 
-		skb = brcmu_pkt_buf_get_skb(BRCMF_MSGBUF_MAX_PKT_SIZE);
+		skb = __brcmu_pkt_buf_get_skb(BRCMF_MSGBUF_MAX_PKT_SIZE, GFP_KERNEL);
 
 		if (skb == NULL) {
 			bphy_err(drvr, "Failed to alloc SKB\n");
@@ -1083,8 +1082,7 @@ brcmf_msgbuf_rxbuf_ctrl_post(struct brcmf_msgbuf *msgbuf, bool event_buf,
 		rx_bufpost = (struct msgbuf_rx_ioctl_resp_or_event *)ret_ptr;
 		memset(rx_bufpost, 0, sizeof(*rx_bufpost));
 
-		skb = brcmu_pkt_buf_get_skb(BRCMF_MSGBUF_MAX_CTL_PKT_SIZE);
-
+		skb = __brcmu_pkt_buf_get_skb(BRCMF_MSGBUF_MAX_CTL_PKT_SIZE, GFP_KERNEL);
 		if (skb == NULL) {
 			bphy_err(drvr, "Failed to alloc SKB\n");
 			brcmf_commonring_write_cancel(commonring, alloced - i);
@@ -1273,7 +1271,7 @@ brcmf_msgbuf_process_rx_complete(struct brcmf_msgbuf *msgbuf, void *buf)
 		}
 	}
 	skb->protocol = eth_type_trans(skb, ifp->ndev);
-	brcmf_netif_rx(ifp, skb, false);
+	brcmf_netif_rx(ifp, skb);
 }
 
 static void brcmf_msgbuf_process_gen_status(struct brcmf_msgbuf *msgbuf,

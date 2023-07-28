@@ -292,6 +292,7 @@ void brcmf_feat_attach(struct brcmf_pub *drvr)
 		ifp->drvr->feat_flags |= BIT(BRCMF_FEAT_SCAN_RANDOM_MAC);
 
 	brcmf_feat_iovar_int_get(ifp, BRCMF_FEAT_FWSUP, "sup_wpa");
+	brcmf_feat_iovar_int_get(ifp, BRCMF_FEAT_TWT, "twt");
 
 	if (drvr->settings->feature_disable) {
 		brcmf_dbg(INFO, "Features: 0x%02x, disable: 0x%02x\n",
@@ -336,4 +337,9 @@ bool brcmf_feat_is_quirk_enabled(struct brcmf_if *ifp,
 bool brcmf_feat_is_6ghz_enabled(struct brcmf_if *ifp)
 {
 	return (!ifp->drvr->settings->disable_6ghz);
+}
+
+bool brcmf_feat_is_sdio_rxf_in_kthread(struct brcmf_pub *drvr)
+{
+	return drvr->settings->sdio_rxf_in_kthread_enabled;
 }

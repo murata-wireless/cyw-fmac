@@ -140,7 +140,9 @@ struct brcmf_pub {
 	u8 clmver[BRCMF_DCMD_SMLEN];
 	struct brcmf_pkt_filter_enable_le pkt_filter[MAX_PKT_FILTER_COUNT];
 	u8 sta_mac_idx;
+	u16 cnt_ver;
 
+	struct cfg80211_qos_map *qos_map;
 };
 
 /* forward declarations */
@@ -199,8 +201,10 @@ struct brcmf_if {
 	struct in6_addr ipv6_addr_tbl[NDOL_MAX_ENTRIES];
 	u8 ipv6addr_idx;
 	bool fwil_fwerr;
-	struct list_head sta_list;              /* sll of associated stations */
+	struct list_head sta_list;              /* dll of associated stations */
 	spinlock_t sta_list_lock;
+	struct list_head twt_sess_list;         /* dll of TWT sessions */
+	spinlock_t twt_sess_list_lock;
 	bool fmac_pkt_fwd_en;
 };
 
@@ -228,7 +232,7 @@ void brcmf_remove_interface(struct brcmf_if *ifp, bool locked);
 void brcmf_txflowblock_if(struct brcmf_if *ifp,
 			  enum brcmf_netif_stop_reason reason, bool state);
 void brcmf_txfinalize(struct brcmf_if *ifp, struct sk_buff *txp, bool success);
-void brcmf_netif_rx(struct brcmf_if *ifp, struct sk_buff *skb, bool inirq);
+void brcmf_netif_rx(struct brcmf_if *ifp, struct sk_buff *skb);
 void brcmf_netif_mon_rx(struct brcmf_if *ifp, struct sk_buff *skb);
 void brcmf_net_detach(struct net_device *ndev, bool locked);
 int brcmf_net_mon_attach(struct brcmf_if *ifp);

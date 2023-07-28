@@ -33,6 +33,7 @@
 #include "vendor_ifx.h"
 #include "bus.h"
 #include "common.h"
+#include "twt.h"
 
 #define BRCMF_SCAN_IE_LEN_MAX		2048
 
@@ -1913,6 +1914,7 @@ static void brcmf_link_down(struct brcmf_cfg80211_vif *vif, u16 reason,
 			brcmf_set_pmk(vif->ifp, NULL, 0);
 		vif->profile.use_fwsup = BRCMF_PROFILE_FWSUP_NONE;
 	}
+
 	brcmf_dbg(TRACE, "Exit\n");
 }
 
@@ -2354,7 +2356,10 @@ brcmf_set_key_mgmt(struct net_device *ndev, struct cfg80211_connect_params *sme)
 		case WLAN_AKM_SUITE_FT_PSK:
 			val = WPA2_AUTH_PSK | WPA2_AUTH_FT;
 			profile->is_ft = true;
-			profile->use_fwsup = BRCMF_PROFILE_FWSUP_ROAM;
+			if (brcmf_feat_is_enabled(ifp, BRCMF_FEAT_FWSUP))
+				profile->use_fwsup = BRCMF_PROFILE_FWSUP_PSK;
+			else
+				profile->use_fwsup = BRCMF_PROFILE_FWSUP_ROAM;
 			break;
 		case WLAN_AKM_SUITE_DPP:
 			val = WFA_AUTH_DPP;
@@ -2965,8 +2970,14 @@ brcmf_cfg80211_disconnect(struct wiphy *wiphy, struct net_device *ndev,
 	scbval.val = cpu_to_le32(reason_code);
 	err = brcmf_fil_cmd_data_set(ifp, BRCMF_C_DISASSOC,
 				     &scbval, sizeof(scbval));
-	if (err)
+	if (err) {
 		bphy_err(drvr, "error (%d)\n", err);
+	} else {
+		if (brcmf_feat_is_enabled(ifp, BRCMF_FEAT_TWT)) {
+		         /* Cleanup TWT Session list */
+		        brcmf_twt_cleanup_sessions(ifp);
+		}
+	}
 
 	brcmf_dbg(TRACE, "Exit\n");
 	return err;
@@ -3443,7 +3454,8 @@ out_kfree:
 
 static s32
 brcmf_cfg80211_get_station_ibss(struct brcmf_if *ifp,
-				struct station_info *sinfo)
+				struct station_info *sinfo,
+				const u8 *mac)
 {
 	struct brcmf_pub *drvr = ifp->drvr;
 	struct brcmf_scb_val_le scbval;
@@ -3462,6 +3474,7 @@ brcmf_cfg80211_get_station_ibss(struct brcmf_if *ifp,
 	sinfo->txrate.legacy = rate * 5;
 
 	memset(&scbval, 0, sizeof(scbval));
+	memcpy(&scbval.ea[0], mac, ETH_ALEN);
 	err = brcmf_fil_cmd_data_get(ifp, BRCMF_C_GET_RSSI, &scbval,
 				     sizeof(scbval));
 	if (err) {
@@ -3513,7 +3526,7 @@ brcmf_cfg80211_get_station(struct wiphy *wiphy, struct net_device *ndev,
 		return -EIO;
 
 	if (brcmf_is_ibssmode(ifp->vif))
-		return brcmf_cfg80211_get_station_ibss(ifp, sinfo);
+		return brcmf_cfg80211_get_station_ibss(ifp, sinfo, mac);
 
 	memset(&sta_info_le, 0, sizeof(sta_info_le));
 	memcpy(&sta_info_le, mac, ETH_ALEN);
@@ -3594,6 +3607,7 @@ brcmf_cfg80211_get_station(struct wiphy *wiphy, struct net_device *ndev,
 		} else if (test_bit(BRCMF_VIF_STATUS_CONNECTED,
 			&ifp->vif->sme_state)) {
 			memset(&scb_val, 0, sizeof(scb_val));
+			memcpy(&scb_val.ea[0], mac, ETH_ALEN);
 			err = brcmf_fil_cmd_data_get(ifp, BRCMF_C_GET_RSSI,
 						     &scb_val, sizeof(scb_val));
 			if (err) {
@@ -5244,13 +5258,14 @@ brcmf_parse_extension_ies(const u8 *extension_ie_buf, u32 extension_ie_len,
 			goto next;
 		}
 
-		/* skip parsing the HE capab & oper IE from upper layer
+		/* skip parsing the HE capab, HE_6G_capa & oper IE from upper layer
 		 * to avoid sending it to the FW, as these IEs will be
 		 * added by the FW based on the MAC & PHY capab if HE
 		 * is enabled.
 		 */
-		if (ext_ie->id == WLAN_EID_EXT_HE_CAPABILITY ||
-		    ext_ie->id == WLAN_EID_EXT_HE_OPERATION)
+		if (ext_ie->ext_id == WLAN_EID_EXT_HE_CAPABILITY ||
+		    ext_ie->ext_id == WLAN_EID_EXT_HE_OPERATION ||
+		    ext_ie->ext_id == WLAN_EID_EXT_HE_6GHZ_CAPA)
 			goto next;
 
 		parsed_info = &extension_ies->ie_info[extension_ies->count];
@@ -5570,8 +5585,23 @@ brcmf_parse_configure_sae_pwe(struct brcmf_if *ifp,
 	const struct brcmf_tlv *supp_rate_ie;
 	u8 ie_len, i;
 	bool support_sae_h2e = false, must_sae_h2e = false;
+	u32 wpa_auth = 0;
+
+	/* get configured wpa_auth */
+	err = brcmf_fil_bsscfg_int_get(ifp, "wpa_auth", &wpa_auth);
+	if ((wpa_auth & WPA3_AUTH_SAE_PSK) == 0) {
+		/* wpa_auth is not SAE, ignore sae_pwe. */
+		brcmf_dbg(INFO, "wpa_auth is not SAE:0x%x\n", wpa_auth);
+		return 0;
+	}
 
 	if (brcmf_feat_is_enabled(ifp, BRCMF_FEAT_SAE_EXT)) {
+		err = brcmf_fil_iovar_int_set(ifp, "extsae_pwe", 0);
+		if (err) {
+			brcmf_err("extsae_pwe iovar is not supported\n");
+			return -EOPNOTSUPP;
+		}
+
 		rsnx_ie = brcmf_parse_tlvs((u8 *)settings->beacon.tail,
 					   settings->beacon.tail_len,
 					   WLAN_EID_RSNX);
@@ -6745,7 +6775,7 @@ brcmf_cfg80211_set_bitrate(struct wiphy *wiphy, struct net_device *ndev,
 		rspec = WL_RSPEC_ENCODE_HE;     /* 11ax HE */
 		rspec |= (WL_RSPEC_HE_NSS_UNSPECIFIED << WL_RSPEC_HE_NSS_SHIFT) | (mcs - 1);
 		/* set the other rspec fields */
-		hegi = mask->control[band].he_gi;
+		hegi = mask->control[band].he_gi + 1;
 		rspec |= ((hegi != 0xFF) ? HE_GI_TO_RSPEC(hegi) : 0);
 
 		if (band == NL80211_BAND_2GHZ)
@@ -7860,14 +7890,6 @@ brcmf_notify_beacon_loss(struct brcmf_if *ifp,
 	return 0;
 }
 
-int brcmf_notify_twt(struct brcmf_if *ifp,
-		     const struct brcmf_event_msg *e,
-		     void *data)
-{
-	brcmf_dbg(TRACE, "Enter\n");
-	return 0;
-}
-
 static void brcmf_init_conf(struct brcmf_cfg80211_conf *conf)
 {
 	conf->frag_threshold = (u32)-1;
@@ -7938,8 +7960,13 @@ static void brcmf_register_event_handlers(struct brcmf_cfg80211_info *cfg)
 			    brcmf_notify_mgmt_tx_status);
 	brcmf_fweh_register(cfg->pub, BRCMF_E_BCNLOST_MSG,
 			    brcmf_notify_beacon_loss);
-	brcmf_fweh_register(cfg->pub, BRCMF_E_TWT_SETUP,
-			    brcmf_notify_twt);
+
+	if (brcmf_feat_is_enabled(ifp, BRCMF_FEAT_TWT)) {
+		brcmf_fweh_register(cfg->pub, BRCMF_E_TWT_SETUP,
+				    brcmf_notify_twt_event);
+		brcmf_fweh_register(cfg->pub, BRCMF_E_TWT_TEARDOWN,
+				    brcmf_notify_twt_event);
+	}
 }
 
 static void brcmf_deinit_priv_mem(struct brcmf_cfg80211_info *cfg)
@@ -8149,17 +8176,29 @@ static int brcmf_construct_chaninfo(struct brcmf_cfg80211_info *cfg,
 	}
 
 	band = wiphy->bands[NL80211_BAND_2GHZ];
-	if (band)
+	if (band) {
+		/* restore channels info */
+		memcpy(band->channels, &__wl_2ghz_channels, sizeof(__wl_2ghz_channels));
+		band->n_channels = ARRAY_SIZE(__wl_2ghz_channels);
 		for (i = 0; i < band->n_channels; i++)
 			band->channels[i].flags = IEEE80211_CHAN_DISABLED;
+	}
 	band = wiphy->bands[NL80211_BAND_5GHZ];
-	if (band)
+	if (band) {
+		/* restore channels info */
+		memcpy(band->channels, &__wl_5ghz_channels, sizeof(__wl_5ghz_channels));
+		band->n_channels = ARRAY_SIZE(__wl_5ghz_channels);
 		for (i = 0; i < band->n_channels; i++)
 			band->channels[i].flags = IEEE80211_CHAN_DISABLED;
+	}
 	band = wiphy->bands[NL80211_BAND_6GHZ];
-	if (band)
+	if (band) {
+		/* restore channels info */
+		memcpy(band->channels, &__wl_6ghz_channels, sizeof(__wl_6ghz_channels));
+		band->n_channels = ARRAY_SIZE(__wl_6ghz_channels);
 		for (i = 0; i < band->n_channels; i++)
 			band->channels[i].flags = IEEE80211_CHAN_DISABLED;
+	}
 
 	total = le32_to_cpu(list->count);
 	for (i = 0; i < total; i++) {
@@ -9096,7 +9135,7 @@ static int brcmf_setup_wiphy(struct wiphy *wiphy, struct brcmf_if *ifp)
 		if (bandlist[i] == cpu_to_le32(WLC_BAND_6G) &&
 		    brcmf_feat_is_6ghz_enabled(ifp)) {
 			band = kmemdup(&__wl_band_6ghz, sizeof(__wl_band_6ghz),
-					   GFP_KERNEL);
+					GFP_KERNEL);
 			if (!band)
 				return -ENOMEM;
 

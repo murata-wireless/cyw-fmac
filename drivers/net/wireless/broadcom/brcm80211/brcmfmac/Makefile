@@ -25,7 +25,8 @@ brcmfmac-objs += \
 		vendor.o \
 		pno.o \
 		xtlv.o \
-		vendor_ifx.o
+		vendor_ifx.o \
+		twt.o
 brcmfmac-$(CPTCFG_BRCMFMAC_PROTO_BCDC) += \
 		bcdc.o \
 		fwsignal.o

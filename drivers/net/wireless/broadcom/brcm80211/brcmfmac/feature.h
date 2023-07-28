@@ -32,6 +32,7 @@
  * DUMP_OBSS: Firmware has capable to dump obss info to support ACS
  * SAE_EXT: SAE be handled by userspace supplicant
  * GCMP: firmware has defined GCMP or not.
+ * TWT: Firmware has the TWT Module Support.
  */
 #define BRCMF_FEAT_LIST \
 	BRCMF_FEAT_DEF(MBSS) \
@@ -59,7 +60,8 @@
 	BRCMF_FEAT_DEF(SAE_EXT) \
 	BRCMF_FEAT_DEF(FBT) \
 	BRCMF_FEAT_DEF(OKC) \
-	BRCMF_FEAT_DEF(GCMP)
+	BRCMF_FEAT_DEF(GCMP) \
+	BRCMF_FEAT_DEF(TWT)
 
 /*
  * Quirks:
@@ -136,5 +138,12 @@ bool brcmf_feat_is_quirk_enabled(struct brcmf_if *ifp,
  * Return: true if 6GHz operation is allowed; otherwise false.
  */
 bool brcmf_feat_is_6ghz_enabled(struct brcmf_if *ifp);
+
+/**
+ * brcmf_feat_is_sdio_rxf_in_kthread() - handle SDIO Rx frame in kthread.
+ *
+ * @drvr: driver instance.
+ */
+bool brcmf_feat_is_sdio_rxf_in_kthread(struct brcmf_pub *drvr);
 
 #endif /* _BRCMF_FEATURE_H */

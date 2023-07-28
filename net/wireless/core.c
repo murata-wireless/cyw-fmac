@@ -509,10 +509,6 @@ use_default_name:
 	INIT_WORK(&rdev->scan_done_wk, __cfg80211_scan_done);
 	INIT_DELAYED_WORK(&rdev->dfs_update_channels_wk,
 			  cfg80211_dfs_channels_update_work);
-#ifdef CPTCFG_CFG80211_WEXT
-	rdev->wiphy.wext = &cfg80211_wext_handler;
-#endif
-
 	device_initialize(&rdev->wiphy.dev);
 	rdev->wiphy.dev.class = &ieee80211_class;
 	rdev->wiphy.dev.platform_data = rdev;
@@ -1297,6 +1293,10 @@ void cfg80211_init_wdev(struct wireless_dev *wdev)
 	INIT_WORK(&wdev->pmsr_free_wk, cfg80211_pmsr_free_wk);
 
 #ifdef CPTCFG_CFG80211_WEXT
+#ifdef CONFIG_WIRELESS_EXT
+	if ((wdev->netdev) && (!wdev->netdev->wireless_handlers))
+		wdev->netdev->wireless_handlers = &cfg80211_wext_handler;
+#endif
 	wdev->wext.default_key = -1;
 	wdev->wext.default_mgmt_key = -1;
 	wdev->wext.connect.auth_type = NL80211_AUTHTYPE_AUTOMATIC;

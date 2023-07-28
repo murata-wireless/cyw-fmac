@@ -15,6 +15,7 @@
 #include <net/ipv6.h>
 #include <brcmu_utils.h>
 #include <brcmu_wifi.h>
+#include <defs.h>
 
 #include "core.h"
 #include "bus.h"
@@ -28,6 +29,7 @@
 #include "proto.h"
 #include "pcie.h"
 #include "common.h"
+#include "twt.h"
 
 #define MAX_WAIT_FOR_8021X_TX			msecs_to_jiffies(950)
 
@@ -36,6 +38,23 @@
 #define	RXS_PBPRES				BIT(2)
 
 #define	D11_PHY_HDR_LEN				6
+
+#define WL_CNT_XTLV_SLICE_IDX		256
+
+#define IOVAR_XTLV_BEGIN		4
+
+#define XTLV_TYPE_SIZE		2
+
+#define XTLV_TYPE_LEN_SIZE		4
+
+#define WL_CNT_IOV_BUF		2048
+
+#define CNT_VER_6	6
+#define CNT_VER_10	10
+#define CNT_VER_30	30
+
+/* Macro to calculate packing factor with scalar 4 in a xTLV */
+#define PACKING_FACTOR(args) ((args) % 4 == 0 ? 0 : (4 - ((args) % 4)))
 
 struct d11rxhdr_le {
 	__le16 RxFrameSize;
@@ -63,6 +82,125 @@ struct wlc_d11rxhdr {
 	s8 rxpwr[4];
 } __packed;
 
+static const char fmac_ethtool_string_stats_v6[][ETH_GSTRING_LEN] = {
+	"txbyte", "txerror", "txprshort", "txnobuf", "txrunt", "txcmiss", "txphyerr",
+	"rxframe", "rxerror", "rxnobuf", "rxbadds", "rxfragerr",
+	"rxgiant", "rxbadproto", "rxbadda", "rxoflo", "d11cnt_rxcrc_off", "dmade",
+	"dmape", "tbtt", "pkt_callback_reg_fail", "txackfrm", "txbcnfrm", "rxtoolate",
+	"txtplunfl", "rxinvmachdr", "rxbadplcp", "rxstrt", "rxmfrmucastmbss",
+	"rxrtsucast", "rxackucast", "rxmfrmocast", "rxrtsocast", "rxdfrmmcast",
+	"rxcfrmmcast", "rxdfrmucastobss", "rxrsptmout", "rxf0ovfl", "rxf2ovfl", "pmqovfl",
+	"frmscons", "rxback", "txfrag", "txfail", "txretrie", "txrts", "txnoack", "rxmulti",
+
+	"txfrmsnt", "tkipmicfaill", "tkipreplay", "ccmpreplay", "fourwayfail", "wepicverr",
+	"tkipicverr", "tkipmicfaill_mcst", "tkipreplay_mcst", "ccmpreplay_mcst",
+	"fourwayfail_mcst", "wepicverr_mcst", "tkipicverr_mcst", "txexptime", "phywatchdog",
+	"prq_undirected_entries", "atim_suppress_count", "bcn_template_not_ready_done",
+
+	"rx1mbps", "rx5mbps5", "rx9mbps", "rx12mbps", "rx24mbps", "rx48mbps",
+	"rx108mbps", "rx216mbps", "rx324mbps", "rx432mbps", "rx540mbps",
+	"pktengrxdmcast", "bphy_txmpdu_sgi", "txmpdu_stbc", "rxdrop20s",
+};
+
+static const char fmac_ethtool_string_stats_v10[][ETH_GSTRING_LEN] = {
+	"txframe", "txbyte", "txretrans", "txerror", "txctl", "txprshort",
+	"txserr", "txnobuf", "txnoassoc", "txrunt",
+	"txchit", "txcmiss", "txphyerr", "txphycrs", "rxframe", "rxbyte",
+	"rxerror", "rxctl", "rxnobuf", "rxnondata",
+	"rxbadds", "rxbadcm", "rxfragerr", "rxrunt", "rxgiant", "rxnoscb",
+	"rxbadprot", "rxbadsrcma", "rxbadda", "rxfilter",
+	"rxoflo", "rxuflo[0]", "rxuflo[1]", "rxuflo[2]", "rxuflo[3]",
+	"rxuflo[4]", "rxuflo[5]", "d11cnt_rxcrc_off", "d11cnt_txnocts_off",
+	"dmade", "dmada", "dmape", "reset", "tbtt", "txdmawar",
+	"pkt_callback_reg_fail", "txallfrm", "txrtsfrm", "txctsfrm",
+	"txackfrm", "txdnlfrm", "txbcnfrm", "txfunfl[0]", "txfunfl[1]",
+	"txfunfl[2]", "txfunfl[3]", "txfunfl[4]", "txfunfl[5]", "rxtoolate",
+	"txfbw", "txtplunfl", "txphyerror", "rxfrmtoolong", "rxfrmtooshrt",
+	"rxinvmachdr", "rxbadfcs", "rxbadplcp", "rxcrsglitch",
+	"rxstrt", "rxdfrmucastmbss", "rxmfrmucastmbss", "rxcfrmucast",
+	"rxrtsucast", "rxctsucast", "rxackucast",
+	"rxdfrmocast", "rxmfrmocast", "rxcfrmocast", "rxrtsocast",
+	"rxctsocast", "rxdfrmmcast", "rxmfrmmcast", "rxcfrmmcast",
+	"rxbeaconmbss", "rxdfrmucastobss", "rxbeaconobss", "rxrsptmout",
+	"bcntxcancl", "rxf0ovfl", "rxf1ovfl", "rxf2ovfl", "txsfovfl",
+	"pmqovfl", "rxcgprqfrm", "rxcgprsqovfl", "txcgprsfail", "txcgprssuc", "prs_timeout",
+	"rxnack", "frmscons", "txnack", "rxback", "txback", "txfrag", "txmulti", "txfail",
+	"txretry", "txretrie", "rxdup", "txrts", "txnocts", "txnoack", "rxfrag", "rxmulti",
+	"rxcrc", "txfrmsnt", "rxundec", "tkipmicfaill", "tkipcntrmsr", "tkipreplay", "ccmpfmterr",
+	"ccmpreplay", "ccmpundec", "fourwayfail", "wepundec", "wepicverr", "decsuccess",
+	"tkipicverr", "wepexcluded", "psmwds", "phywatchdog", "prq_entries_handled",
+	"prq_undirected_entries", "prq_bad_entries", "atim_suppress_count",
+	"bcn_template_not_ready", "bcn_template_not_ready_done", "late_tbtt_dpc",
+	"rx1mbps", "rx2mbps", "rx5mbps5", "rx6mbps", "rx9mbps", "rx11mbps", "rx12mbps", "rx18mbps",
+	"rx24mbps", "rx36mbps", "rx48mbps", "rx54mbps", "rx108mbps", "rx162mbps",
+	"rx216mbps", "rx270mbps", "rx324mbps", "rx378mbps", "rx432mbps", "rx486mbps", "rx540mbps",
+	"pktengrxducast", "pktengrxdmcast", "bphy_rxcrsglitch", "bphy_b", "txexptime",
+	"rxmpdu_sgi", "txmpdu_stbc", "rxmpdu_stbc", "tkipmicfaill_mcst", "tkipcntrmsr_mcst",
+	"tkipreplay_mcst", "ccmpfmterr_mcst", "ccmpreplay_mcst", "ccmpundec_mcst",
+	"fourwayfail_mcst", "wepundec_mcst", "wepicverr_mcst", "decsuccess_mcst",
+	"tkipicverr_mcst", "wepexcluded_mcst", "reinit", "pstatxnoassoc",
+	"pstarxucast", "pstarxbcmc", "pstatxbcmc", "cso_normal", "chained",
+	"chainedsz1", "unchained", "maxchainsz", "currchainsz", "rxdrop20s",
+	"pciereset", "cfgrestore", "reinitreason[0]", "reinitreason[1]",
+	"reinitreason[2]", "reinitreason[3]", "reinitreason[4]",
+	"reinitreason[5]", "reinitreason[6]", "reinitreason[7]", "rxrtry",
+};
+
+static const char fmac_ethtool_string_stats_v30[][ETH_GSTRING_LEN] = {
+	"txframe", "txbyte", "txretrans", "txerror", "txctl", "txprshort", "txserr", "txnobuf",
+	"txnoassoc", "txrunt", "txchit", "txcmiss", "txuflo", "txphyerr", "txphycrs",
+	"rxframe", "rxbyte", "rxerror", "rxctl", "rxnobuf", "rxnondata", "rxbadds", "rxbadcm",
+	"rxfragerr", "rxrunt", "rxgiant", "rxnoscb", "rxbadproto", "rxbadsrcmac",
+	"rxbadda", "rxfilter", "rxoflo", "rxuflo[0]", "rxuflo[1]",
+	"rxuflo[2]", "rxuflo[3]", "rxuflo[4]", "rxuflo[5]",
+
+	"d11cnt_txrts_off", "d11cnt_rxcrc_off", "d11cnt_txnocts_off", "dmade", "dmada",
+	"dmape", "reset", "tbtt", "txdmawar", "pkt_callback_reg_fail",
+	"txfrag", "txmulti", "txfail", "txretry",
+	"txretrie", "rxdup", "txrts", "txnocts", "txnoack", "rxfrag",
+	"rxmulti", "rxcrc", "txfrmsnt", "rxundec",
+	"tkipmicfaill", "tkipcntrmsr", "tkipreplay", "ccmpfmterr",
+	"ccmpreplay", "ccmpundec", "fourwayfail", "wepundec",
+	"wepicverr", "decsuccess", "tkipicverr", "wepexcluded",
+	"txchanrej", "psmwds", "phywatchdog",
+	"prq_entries_handled", "prq_undirected_entries", "prq_bad_entries",
+	"atim_suppress_count", "bcn_template_not_ready", "bcn_template_not_ready_done",
+	"late_tbtt_dpc",
+
+	"rx1mbps", "rx2mbps", "rx5mbps5", "rx6mbps", "rx9mbps",
+	"rx11mbps", "rx12mbps", "rx18mbps", "rx24mbps", "rx36mbps",
+	"rx48mbps", "rx54mbps", "rx108mbps", "rx162mbps", "rx216mbps",
+	"rx270mbps", "rx324mbps", "rx378mbps", "rx432mbps", "rx486mbps",
+	"rx540mbps", "rfdisable", "txexptime", "txmpdu_sgi", "rxmpdu_sgi",
+	"txmpdu_stbc", "rxmpdu_stbc", "rxundec_mcst",
+
+	"tkipmicfaill_mcst", "tkipcntrmsr_mcst", "tkipreplay_mcst",
+	"ccmpfmterr_mcst", "ccmpreplay_mcst", "ccmpundec_mcst",
+	"fourwayfail_mcst", "wepundec_mcst", "wepicverr_mcst",
+	"decsuccess_mcst", "tkipicverr_mcst", "wepexcluded_mcst",
+	"dma_hang", "reinit", "pstatxucast",
+	"pstatxnoassoc", "pstarxucast", "pstarxbcmc",
+	"pstatxbcmc", "cso_passthrough", "cso_normal",
+	"chained", "chainedsz1", "unchained",
+	"maxchainsz", "currchainsz", "pciereset",
+	"cfgrestore", "reinitreason[0]", "reinitreason[1]",
+	"reinitreason[2]", "reinitreason[3]", "reinitreason[4]",
+	"reinitreason[5]", "reinitreason[6]", "reinitreason[7]",
+	"rxrtry", "rxmpdu_mu",
+
+	"txbar", "rxbar", "txpspoll", "rxpspoll", "txnull",
+	"rxnull", "txqosnull", "rxqosnull", "txassocreq", "rxassocreq",
+	"txreassocreq", "rxreassocreq", "txdisassoc", "rxdisassoc",
+	"txassocrsp", "rxassocrsp", "txreassocrsp", "rxreassocrsp",
+	"txauth", "rxauth", "txdeauth", "rxdeauth", "txprobereq",
+	"rxprobereq", "txprobersp", "rxprobersp", "txaction",
+	"rxaction", "ampdu_wds", "txlost", "txdatamcast",
+	"txdatabcast", "psmxwds", "rxback", "txback",
+	"p2p_tbtt", "p2p_tbtt_miss", "txqueue_start", "txqueue_end",
+	"txbcast", "txdropped", "rxbcast", "rxdropped",
+	"txq_end_assoccb",
+};
+
 #define BRCMF_IF_STA_LIST_LOCK_INIT(ifp) spin_lock_init(&(ifp)->sta_list_lock)
 #define BRCMF_IF_STA_LIST_LOCK(ifp, flags) \
 	spin_lock_irqsave(&(ifp)->sta_list_lock, (flags))
@@ -70,6 +208,15 @@ struct wlc_d11rxhdr {
 	spin_unlock_irqrestore(&(ifp)->sta_list_lock, (flags))
 
 #define BRCMF_STA_NULL ((struct brcmf_sta *)NULL)
+
+/* dscp exception format {dscp hex, up}  */
+struct cfg80211_dscp_exception dscp_excpt[] = {
+{DSCP_EF, 6}, {DSCP_CS4, 5}, {DSCP_AF41, 5}, {DSCP_CS3, 4} };
+
+/* dscp range : up[0 ~ 7] */
+struct cfg80211_dscp_range dscp_range[8] = {
+{0, 7}, {8, 15}, {16, 23}, {24, 31},
+{32, 39}, {40, 47}, {48, 55}, {56, 63} };
 
 char *brcmf_ifname(struct brcmf_if *ifp)
 {
@@ -367,9 +514,13 @@ static netdev_tx_t brcmf_netdev_start_xmit(struct sk_buff *skb,
 	if (eh->h_proto == htons(ETH_P_PAE))
 		atomic_inc(&ifp->pend_8021x_cnt);
 
+	/* Look into dscp to WMM UP mapping with cfg80211_qos_map */
+	if (drvr->settings->pkt_prio) {
+		skb->priority = cfg80211_classify8021d(skb, drvr->qos_map);
 	/* determine the priority */
-	if ((skb->priority == 0) || (skb->priority > 7))
+	} else if ((skb->priority == 0) || (skb->priority > 7)) {
 		skb->priority = cfg80211_classify8021d(skb, NULL);
+	}
 
 	/* set pacing shift for packet aggregation */
 	sk_pacing_shift_update(skb->sk, 8);
@@ -414,7 +565,7 @@ void brcmf_txflowblock_if(struct brcmf_if *ifp,
 	spin_unlock_irqrestore(&ifp->netif_stop_lock, flags);
 }
 
-void brcmf_netif_rx(struct brcmf_if *ifp, struct sk_buff *skb, bool inirq)
+void brcmf_netif_rx(struct brcmf_if *ifp, struct sk_buff *skb)
 {
 	/* Most of Broadcom's firmwares send 802.11f ADD frame every time a new
 	 * STA connects to the AP interface. This is an obsoleted standard most
@@ -437,15 +588,7 @@ void brcmf_netif_rx(struct brcmf_if *ifp, struct sk_buff *skb, bool inirq)
 	ifp->ndev->stats.rx_packets++;
 
 	brcmf_dbg(DATA, "rx proto=0x%X\n", ntohs(skb->protocol));
-	if (inirq) {
-		netif_rx(skb);
-	} else {
-		/* If the receive is not processed inside an ISR,
-		 * the softirqd must be woken explicitly to service
-		 * the NET_RX_SOFTIRQ.  This is handled by netif_rx_ni().
-		 */
-		netif_rx_ni(skb);
-	}
+	netif_rx(skb);
 }
 
 void brcmf_netif_mon_rx(struct brcmf_if *ifp, struct sk_buff *skb)
@@ -494,7 +637,7 @@ void brcmf_netif_mon_rx(struct brcmf_if *ifp, struct sk_buff *skb)
 	skb->pkt_type = PACKET_OTHERHOST;
 	skb->protocol = htons(ETH_P_802_2);
 
-	brcmf_netif_rx(ifp, skb, false);
+	brcmf_netif_rx(ifp, skb);
 }
 
 static int brcmf_rx_hdrpull(struct brcmf_pub *drvr, struct sk_buff *skb,
@@ -516,8 +659,8 @@ static int brcmf_rx_hdrpull(struct brcmf_pub *drvr, struct sk_buff *skb,
 	return 0;
 }
 
-void brcmf_rx_frame(struct device *dev, struct sk_buff *skb, bool handle_event,
-		    bool inirq)
+struct sk_buff *brcmf_rx_frame(struct device *dev, struct sk_buff *skb, bool handle_event,
+			       bool inirq)
 {
 	struct brcmf_if *ifp;
 	struct brcmf_bus *bus_if = dev_get_drvdata(dev);
@@ -526,10 +669,10 @@ void brcmf_rx_frame(struct device *dev, struct sk_buff *skb, bool handle_event,
 	brcmf_dbg(DATA, "Enter: %s: rxp=%p\n", dev_name(dev), skb);
 
 	if (brcmf_rx_hdrpull(drvr, skb, &ifp))
-		return;
+		return NULL;
 
 	if (brcmf_proto_is_reorder_skb(skb)) {
-		brcmf_proto_rxreorder(ifp, skb, inirq);
+		brcmf_proto_rxreorder(ifp, skb);
 	} else {
 		/* Process special event packets */
 		if (handle_event) {
@@ -538,8 +681,14 @@ void brcmf_rx_frame(struct device *dev, struct sk_buff *skb, bool handle_event,
 			brcmf_fweh_process_skb(ifp->drvr, skb,
 					       BCMILCP_SUBTYPE_VENDOR_LONG, gfp);
 		}
-		brcmf_netif_rx(ifp, skb, inirq);
+
+		/* if sdio_rxf_in_kthread, enqueue it and process it later. */
+		if (brcmf_feat_is_sdio_rxf_in_kthread(drvr))
+			return skb;
+		else
+			brcmf_netif_rx(ifp, skb);
 	}
+	return NULL;
 }
 
 void brcmf_rx_event(struct device *dev, struct sk_buff *skb)
@@ -591,11 +740,148 @@ static void brcmf_ethtool_get_drvinfo(struct net_device *ndev,
 	strlcpy(info->fw_version, drvr->fwver, sizeof(info->fw_version));
 	strlcpy(info->bus_info, dev_name(drvr->bus_if->dev),
 		sizeof(info->bus_info));
+
+	if (!drvr->cnt_ver) {
+		int ret;
+		u8 *iovar_out;
+
+		iovar_out = kzalloc(WL_CNT_IOV_BUF, GFP_KERNEL);
+		if (!iovar_out)
+			return;
+		ret = brcmf_fil_iovar_data_get(ifp, "counters", iovar_out, WL_CNT_IOV_BUF);
+		if (ret) {
+			brcmf_err("Failed to get counters, code :%d\n", ret);
+			goto done;
+		}
+		memcpy(&drvr->cnt_ver, iovar_out, sizeof(drvr->cnt_ver));
+done:
+	kfree(iovar_out);
+	iovar_out = NULL;
+	}
+}
+
+static void brcmf_et_get_strings(struct net_device *net_dev,
+				u32 sset, u8 *strings)
+{
+	struct brcmf_if *ifp = netdev_priv(net_dev);
+	struct brcmf_pub *drvr = ifp->drvr;
+
+	if (sset == ETH_SS_STATS) {
+		switch (drvr->cnt_ver) {
+		case CNT_VER_6:
+			memcpy(strings, fmac_ethtool_string_stats_v6,
+				sizeof(fmac_ethtool_string_stats_v6));
+			break;
+		case CNT_VER_10:
+			memcpy(strings, fmac_ethtool_string_stats_v10,
+				sizeof(fmac_ethtool_string_stats_v10));
+			break;
+		case CNT_VER_30:
+			memcpy(strings, fmac_ethtool_string_stats_v30,
+				sizeof(fmac_ethtool_string_stats_v30));
+			break;
+		default:
+			brcmf_err("Unsupported counters version\n");
+		}
+	}
+}
+
+static int brcmf_find_wlc_cntr_tlv(u8 *src, u16 *len)
+{
+	u16 tlv_id, data_len;
+	u16 packing_offset, cur_tlv = IOVAR_XTLV_BEGIN;
+
+	while (cur_tlv < *len) {
+		memcpy(&tlv_id, (src + cur_tlv), sizeof(*len));
+		memcpy(&data_len, (src + cur_tlv + XTLV_TYPE_SIZE), sizeof(*len));
+		if (tlv_id == WL_CNT_XTLV_SLICE_IDX) {
+			*len = data_len;
+			return cur_tlv;
+		}
+		/* xTLV data has 4 bytes packing. So caclculate the packing offset using the data */
+		packing_offset = PACKING_FACTOR(data_len);
+		cur_tlv += XTLV_TYPE_LEN_SIZE + data_len + packing_offset;
+	}
+	return -EINVAL;
+}
+
+static void brcmf_et_get_stats(struct net_device *netdev,
+				struct ethtool_stats *et_stats, u64 *results_buf)
+{
+	struct brcmf_if *ifp = netdev_priv(netdev);
+	u8 *iovar_out, *src, ret;
+	u16 version, len, xTLV_wl_cnt_offset = 0;
+	u16 soffset = 0, idx = 0;
+
+	iovar_out = kzalloc(WL_CNT_IOV_BUF, GFP_KERNEL);
+
+	if (!iovar_out)
+		return;
+
+	ret = brcmf_fil_iovar_data_get(ifp, "counters", iovar_out, WL_CNT_IOV_BUF);
+	if (ret) {
+		brcmf_err("Failed to get counters, code :%d\n", ret);
+		goto done;
+	}
+	src = iovar_out;
+
+	memcpy(&version, src, sizeof(version));
+	soffset += sizeof(version);
+	memcpy(&len, (src + soffset), sizeof(len));
+	soffset += sizeof(len);
+
+	/* Check counters version and decide if its non-TLV or TLV (version>=30)*/
+	if (version >= CNT_VER_30) {
+		xTLV_wl_cnt_offset = brcmf_find_wlc_cntr_tlv(src, &len);
+		len = (len / sizeof(u32));
+	} else {
+		len = (len / sizeof(u32)) - sizeof(u32);
+	}
+
+	src = src + soffset + xTLV_wl_cnt_offset;
+	while (idx < (len)) {
+		results_buf[idx++] = *((u32 *)src);
+		src += sizeof(u32);
+	}
+done:
+	kfree(iovar_out);
+	iovar_out = NULL;
+}
+
+static int brcmf_et_get_scount(struct net_device *dev, int sset)
+{
+	u16 array_size;
+	struct brcmf_if *ifp = netdev_priv(dev);
+	struct brcmf_pub *drvr = ifp->drvr;
+
+	if (sset == ETH_SS_STATS) {
+		switch (drvr->cnt_ver) {
+		case CNT_VER_6:
+			array_size = ARRAY_SIZE(fmac_ethtool_string_stats_v6);
+			break;
+		case CNT_VER_10:
+			array_size = ARRAY_SIZE(fmac_ethtool_string_stats_v10);
+			break;
+		case CNT_VER_30:
+			array_size = ARRAY_SIZE(fmac_ethtool_string_stats_v30);
+			break;
+		default:
+			brcmf_err("Unsupported counters version\n");
+			return -EOPNOTSUPP;
+		}
+	} else {
+		brcmf_dbg(INFO, "Does not support ethtool string set %d\n", sset);
+		return -EOPNOTSUPP;
+	}
+	return array_size;
 }
 
 static const struct ethtool_ops brcmf_ethtool_ops = {
 	.get_drvinfo = brcmf_ethtool_get_drvinfo,
 	.get_ts_info = ethtool_op_get_ts_info,
+	.get_strings		= brcmf_et_get_strings,
+	.get_ethtool_stats	= brcmf_et_get_stats,
+	.get_sset_count		= brcmf_et_get_scount,
 };
 
 static int brcmf_netdev_stop(struct net_device *ndev)
@@ -942,6 +1228,11 @@ struct brcmf_if *brcmf_add_if(struct brcmf_pub *drvr, s32 bsscfgidx, s32 ifidx,
 	BRCMF_IF_STA_LIST_LOCK_INIT(ifp);
 	 /* Initialize STA info list */
 	INIT_LIST_HEAD(&ifp->sta_list);
+
+	spin_lock_init(&ifp->twt_sess_list_lock);
+	 /* Initialize TWT Session list */
+	INIT_LIST_HEAD(&ifp->twt_sess_list);
+
 	if (mac_addr != NULL)
 		memcpy(ifp->mac_addr, mac_addr, ETH_ALEN);
 
@@ -1001,10 +1292,11 @@ static void brcmf_del_if(struct brcmf_pub *drvr, s32 bsscfgidx,
 
 void brcmf_remove_interface(struct brcmf_if *ifp, bool locked)
 {
-	if (!ifp || WARN_ON(ifp->drvr->iflist[ifp->bsscfgidx] != ifp))
+	if (!ifp || !(ifp->drvr) || WARN_ON(ifp->drvr->iflist[ifp->bsscfgidx] != ifp)) {
+		brcmf_err("Invalid interface or driver\n");
 		return;
-	brcmf_dbg(TRACE, "Enter, bsscfgidx=%d, ifidx=%d\n", ifp->bsscfgidx,
-		  ifp->ifidx);
+	}
+	brcmf_dbg(TRACE, "Enter, bsscfgidx=%d, ifidx=%d\n", ifp->bsscfgidx, ifp->ifidx);
 	brcmf_proto_del_if(ifp->drvr, ifp);
 	brcmf_del_if(ifp->drvr, ifp->bsscfgidx, locked);
 }
@@ -1248,6 +1540,7 @@ static int brcmf_bus_started(struct brcmf_pub *drvr, struct cfg80211_ops *ops)
 	struct brcmf_bus *bus_if = drvr->bus_if;
 	struct brcmf_if *ifp;
 	struct brcmf_if *p2p_ifp;
+	int i, num;
 
 	brcmf_dbg(TRACE, "\n");
 
@@ -1286,6 +1579,22 @@ static int brcmf_bus_started(struct brcmf_pub *drvr, struct cfg80211_ops *ops)
 		goto fail;
 	}
 
+	/* update custom DSCP to PRIO mapping */
+	if (drvr->settings->pkt_prio) {
+		drvr->qos_map = kzalloc(sizeof(struct cfg80211_qos_map), GFP_KERNEL);
+		if (!drvr->qos_map) {
+			ret = -ENOMEM;
+			goto fail;
+		}
+		num = sizeof(dscp_excpt) / (sizeof(struct cfg80211_dscp_exception));
+		drvr->qos_map->num_des = num;
+		for (i = 0; i < num; i++) {
+			drvr->qos_map->dscp_exception[i].dscp = dscp_excpt[i].dscp;
+			drvr->qos_map->dscp_exception[i].up = dscp_excpt[i].up;
+		}
+		memcpy(drvr->qos_map->up, dscp_range, sizeof(dscp_range[8]));
+	}
+
 	ret = brcmf_net_attach(ifp, false);
 
 	if ((!ret) && (drvr->settings->p2p_enable)) {
@@ -1322,6 +1631,7 @@ static int brcmf_bus_started(struct brcmf_pub *drvr, struct cfg80211_ops *ops)
 	brcmf_feat_debugfs_create(drvr);
 	brcmf_proto_debugfs_create(drvr);
 	brcmf_bus_debugfs_create(bus_if);
+	brcmf_twt_debugfs_create(drvr);
 
 	return 0;
 
@@ -1489,6 +1799,11 @@ void brcmf_detach(struct device *dev)
 			brcmf_remove_interface(drvr->iflist[i], false);
 	}
 	brcmf_bus_stop(drvr->bus_if);
+
+	if (drvr->settings->pkt_prio) {
+		kfree(drvr->qos_map);
+		drvr->qos_map = NULL;
+	}
 
 	brcmf_fweh_detach(drvr);
 	brcmf_proto_detach(drvr);
