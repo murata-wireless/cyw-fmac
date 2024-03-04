@@ -37,13 +37,47 @@
 #include "cfg80211.h"
 
 /**
+ * brcmf_twt_oper_str - array of twt operations in string
+ */
+const char *brcmf_twt_oper_str[IFX_TWT_OPER_MAX] = {
+	"Setup",
+	"Teardown"
+};
+
+/**
+ * brcmf_twt_nego_type_str - array of twt Negotiation types in string
+ */
+const char *brcmf_twt_nego_type_str[IFX_TWT_PARAM_NEGO_TYPE_MAX] = {
+	"iTWT",
+	"Wake TBTT",
+	"bTWT IE BCN",
+	"bTWT"
+};
+
+/**
+ * brcmf_twt_setup_cmd_str - array of twt setup commands in string
+ */
+const char *brcmf_twt_setup_cmd_str[IFX_TWT_OPER_SETUP_CMD_TYPE_MAX] = {
+	"Request",
+	"Suggest",
+	"Demand",
+	"Grouping",
+	"Accept",
+	"Alternate",
+	"Dictate",
+	"Reject"
+};
+
+/**
  * brcmf_twt_session_state_str - array of twt session states in string
  */
-const char* brcmf_twt_session_state_str[BRCMF_TWT_SESS_STATE_MAX] = {
+const char *brcmf_twt_session_state_str[BRCMF_TWT_SESS_STATE_MAX] = {
 	"Unspec",
 	"Setup inprogress",
+	"Setup incomplete",
 	"Setup complete",
-	"Teardown inprogres",
+	"Teardown inprogress",
+	"Teardown incomplete",
 	"Teardown complete"
 };
 
@@ -144,6 +178,22 @@ brcmf_twt_float_to_u32(u8 exponent, u16 mantissa)
 }
 
 /**
+ * brcmf_twt_get_next_dialog_token() - Return the next avaialable Dialog token.
+ *
+ * return: Dialog token in u8.
+ */
+static inline u8
+brcmf_twt_get_next_dialog_token(void)
+{
+	static u8 dialog_token;
+
+	/* Continuous iteratation in the range 1-255 */
+	dialog_token = ((dialog_token + 0x1) % 0x100) ? : 1;
+
+	return dialog_token;
+}
+
+/**
  * brcmf_twt_stats_read() - Read the contents of the debugfs file "twt_stats".
  *
  * @seq: sequence for debugfs entry.
@@ -172,8 +222,7 @@ brcmf_twt_stats_read(struct seq_file *seq, void *data)
 			continue;
 
 		seq_printf(seq, "ifname: %s, ifidx: %u, bsscfgidx: %d\n",
-			   ifp->ndev ? ifp->ndev->name : "<no-ndev>" ,
-			   ifp->ifidx, ifp->bsscfgidx);
+			   brcmf_ifname(ifp), ifp->ifidx, ifp->bsscfgidx);
 
 		/* Iterate the TWT session list in struct brcmf_if */
 		list_for_each_entry(twt_sess, &ifp->twt_sess_list, list) {
@@ -188,11 +237,11 @@ brcmf_twt_stats_read(struct seq_file *seq, void *data)
 							  twt_params->mantissa);
 
 			if (twt_params->negotiation_type == IFX_TWT_PARAM_NEGO_TYPE_ITWT)
-				seq_printf(seq, "\tiTWT Session, Flow ID: %u\n",
-					   twt_params->flow_id);
+				seq_printf(seq, "\tiTWT, Flow ID: %u, Dialog Token: %u\n",
+					   twt_params->flow_id, twt_params->dialog_token);
 			else if (twt_params->negotiation_type == IFX_TWT_PARAM_NEGO_TYPE_BTWT)
-				seq_printf(seq, "\tbTWT Session, Bcast TWT ID: %u\n",
-					   twt_params->bcast_twt_id);
+				seq_printf(seq, "\tbTWT, Bcast TWT ID: %u, Dialog Token: %u\n",
+					   twt_params->bcast_twt_id, twt_params->dialog_token);
 			else
 				continue;
 
@@ -206,8 +255,6 @@ brcmf_twt_stats_read(struct seq_file *seq, void *data)
 				   wake_dur);
 			seq_printf(seq, "\t\tWake Interval       : %u uS\n",
 				   wake_int);
-			seq_printf(seq, "\t\tDialog_token        : %u\n",
-				   twt_params->dialog_token);
 			seq_printf(seq, "\t\tSession type        : %s, %s, %s\n\n",
 				   twt_params->implicit ? "Implicit" : "Explicit",
 				   twt_params->trigger ? "Trigger based" : "Non-Trigger based",
@@ -249,16 +296,39 @@ brcmf_twt_cleanup_sessions(struct brcmf_if *ifp)
 	spin_lock(&ifp->twt_sess_list_lock);
 
 	list_for_each_entry_safe(entry, next, &ifp->twt_sess_list, list) {
-
+		brcmf_dbg(TWT, "TWT: Deleting session(%u) with peer %pM",
+			  entry->twt_params.flow_id, entry->peer_addr.octet);
 		list_del(&entry->list);
 		kfree(entry);
-		brcmf_dbg(TWT, "TWT: Deleted session with peer: %pM, flow ID: %d",
-			  entry->peer_addr.octet, entry->twt_params.flow_id);
 	}
 
 	spin_unlock(&ifp->twt_sess_list_lock);
 
 	return ret;
+}
+
+/**
+ * brcmf_twt_lookup_session_by_dialog_token() - Lookup a TWT sesssion information from
+ *	the driver list based on the Dialog Token.
+ *
+ * @ifp: interface instance
+ * @dialog_token: TWT session Dialog Token
+ *
+ * return: Pointer to a TWT session instance if lookup is successful, NULL on failure.
+ */
+static struct brcmf_twt_session *
+brcmf_twt_lookup_session_by_dialog_token(struct brcmf_if *ifp, u8 dialog_token)
+{
+	struct brcmf_twt_session *iter = NULL;
+
+	if (list_empty(&ifp->twt_sess_list))
+		return NULL;
+
+	list_for_each_entry(iter, &ifp->twt_sess_list, list)
+		if (iter->twt_params.dialog_token == dialog_token)
+			return iter;
+
+	return NULL;
 }
 
 /**
@@ -306,7 +376,7 @@ brcmf_twt_update_session_state(struct brcmf_if *ifp, struct brcmf_twt_session *t
 
 	if (!twt_sess) {
 		brcmf_dbg(TWT,
-			  "TWT: session is not available to update new state: %s",
+			  "TWT: session is not available to update new state(%s)",
 			  brcmf_twt_session_state_str[state]);
 		ret = -EINVAL;
 		goto exit;
@@ -315,10 +385,8 @@ brcmf_twt_update_session_state(struct brcmf_if *ifp, struct brcmf_twt_session *t
 	spin_lock(&ifp->twt_sess_list_lock);
 
 	twt_sess->state = state;
-	brcmf_dbg(TWT, "TWT: updated session with peer: %pM, "
-		  "flow ID: %d, state: %s",
-		  twt_sess->peer_addr.octet,
-		  twt_sess->twt_params.flow_id,
+	brcmf_dbg(TWT, "TWT: updated session(%u) with peer %pM, state(%s)",
+		  twt_sess->twt_params.flow_id, twt_sess->peer_addr.octet,
 		  brcmf_twt_session_state_str[twt_sess->state]);
 
 	spin_unlock(&ifp->twt_sess_list_lock);
@@ -357,10 +425,9 @@ brcmf_twt_update_session(struct brcmf_if *ifp, struct brcmf_twt_session *twt_ses
 	memcpy(&twt_sess->twt_params, twt_params,
 	       sizeof(struct brcmf_twt_params));
 
-	brcmf_dbg(TWT, "TWT: updated session with peer: %pM, "
-		  "flow ID: %d, state: %s",
-		  twt_sess->peer_addr.octet,
+	brcmf_dbg(TWT, "TWT: updated session(%u) with peer %pM, state(%s)",
 		  twt_sess->twt_params.flow_id,
+		  twt_sess->peer_addr.octet,
 		  brcmf_twt_session_state_str[twt_sess->state]);
 
 	spin_unlock(&ifp->twt_sess_list_lock);
@@ -397,8 +464,8 @@ brcmf_twt_del_session(struct brcmf_if *ifp, struct brcmf_twt_session *twt_sess)
 	list_del(&twt_sess->list);
 	kfree(twt_sess);
 
-	brcmf_dbg(TWT, "TWT: Deleted session with peer: %pM, flow ID: %d",
-		  peer_addr, flow_id);
+	brcmf_dbg(TWT, "TWT: Deleted session(%u) with peer %pM",
+		  flow_id, peer_addr);
 
 	spin_unlock(&ifp->twt_sess_list_lock);
 exit:
@@ -441,15 +508,74 @@ brcmf_twt_add_session(struct brcmf_if *ifp, const u8 *peer_addr,
 	spin_lock(&ifp->twt_sess_list_lock);
 
 	list_add_tail(&new_twt_sess->list, &ifp->twt_sess_list);
-	brcmf_dbg(TWT, "TWT: Added session with peer: %pM, "
-		  "flow ID: %d, state: %s",
-		  new_twt_sess->peer_addr.octet,
+	brcmf_dbg(TWT, "TWT: Added session(%u) with peer %pM, state (%s)",
 		  new_twt_sess->twt_params.flow_id,
+		  new_twt_sess->peer_addr.octet,
 		  brcmf_twt_session_state_str[new_twt_sess->state]);
 
 	spin_unlock(&ifp->twt_sess_list_lock);
 exit:
 	return ret;
+}
+
+/**
+ * brcmf_twt_event_timeout_handler - Iterate the session list and handle stale
+ *	TWT session entries which are failed to move to next state in FSM.
+ *
+ * @t: timer instance.
+ */
+void brcmf_twt_event_timeout_handler(struct timer_list *t)
+{
+	struct brcmf_if *ifp = from_timer(ifp, t, twt_evt_timeout);
+	struct brcmf_twt_session *twt_sess = NULL, *next = NULL;
+	unsigned long curr_ts = jiffies;
+	s32 ret = 0;
+
+	list_for_each_entry_safe(twt_sess, next, &ifp->twt_sess_list, list) {
+		/* For this session entry, Skip if the time since the TWT cmd sent to the
+		 * Firmware does not exceed the Event timeout configured.
+		 */
+		if (time_after(twt_sess->oper_start_ts + BRCMF_TWT_EVENT_TIMEOUT, curr_ts))
+			continue;
+
+		switch (twt_sess->state) {
+		case BRCMF_TWT_SESS_STATE_SETUP_INPROGRESS:
+			ret = brcmf_twt_update_session_state(ifp, twt_sess,
+							     BRCMF_TWT_SESS_STATE_SETUP_INCOMPLETE);
+			if (ret) {
+				brcmf_err("TWT: Failed to update session(%u) with state(%s)",
+					  twt_sess->twt_params.flow_id,
+					  brcmf_twt_session_state_str[BRCMF_TWT_SESS_STATE_SETUP_INCOMPLETE]);
+				continue;
+			}
+
+			break;
+		case BRCMF_TWT_SESS_STATE_TEARDOWN_INPROGRESS:
+			ret = brcmf_twt_update_session_state(ifp, twt_sess,
+							     BRCMF_TWT_SESS_STATE_TEARDOWN_INCOMPLETE);
+			if (ret) {
+				brcmf_err("TWT: Failed to update session(%u) with state(%s)",
+					  twt_sess->twt_params.flow_id,
+					  brcmf_twt_session_state_str[BRCMF_TWT_SESS_STATE_TEARDOWN_INCOMPLETE]);
+				continue;
+			}
+
+			break;
+		default:
+			continue;
+		}
+
+		ret = brcmf_twt_del_session(ifp, twt_sess);
+		if (ret) {
+			brcmf_err("TWT: Failed to Delete session(%u) from list",
+				  twt_sess->twt_params.flow_id);
+			break;
+		}
+
+		brcmf_dbg(TWT, "TWT: Cleared stale session(%u) with peer %pM, state(%s)",
+			  twt_sess->twt_params.flow_id, twt_sess->peer_addr.octet,
+			  brcmf_twt_session_state_str[twt_sess->state]);
+	}
 }
 
 /**
@@ -469,7 +595,8 @@ brcmf_twt_setup_event_handler(struct brcmf_if *ifp, const struct brcmf_event_msg
 	struct brcmf_twt_sdesc *setup_desc;
 	struct brcmf_twt_session *twt_sess = NULL;
 	struct brcmf_twt_params twt_params;
-	s32 ret = -1;
+	bool unsolicited_setup = false;
+	s32 ret = 0;
 
 	setup_event = (struct brcmf_twt_setup_event *)data;
 	setup_desc = (struct brcmf_twt_sdesc *)
@@ -478,33 +605,43 @@ brcmf_twt_setup_event_handler(struct brcmf_if *ifp, const struct brcmf_event_msg
 	/* TWT Negotiation_type */
 	twt_params.negotiation_type = setup_desc->negotiation_type;
 
+	/* Dialog Token */
+	twt_params.dialog_token = setup_event->dialog;
+
 	switch (twt_params.negotiation_type) {
 		case IFX_TWT_PARAM_NEGO_TYPE_ITWT:
 			/* Flow ID */
 			twt_params.flow_id = setup_desc->flow_id;
+
+			/* Lookup the session list for the flow ID in the Setup Response */
+			twt_sess = brcmf_itwt_lookup_session_by_flowid(ifp, twt_params.flow_id);
+			if (!twt_sess)
+				twt_sess = brcmf_twt_lookup_session_by_dialog_token(ifp,
+										    twt_params.dialog_token);
+
+			/* If this device requested for session setup, a session entry with
+			 * state(setup inprogess) would be already available, else this is an
+			 * Unsolicited Setup Response from the peer TWT device.
+			 */
+			if (!twt_sess || twt_sess->state != BRCMF_TWT_SESS_STATE_SETUP_INPROGRESS)
+				unsolicited_setup = true;
+
 			break;
 		case IFX_TWT_PARAM_NEGO_TYPE_BTWT:
 			/* Broadcast TWT ID */
 			twt_params.bcast_twt_id = setup_desc->bid;
 
 			/* TODO: Handle the Broadcast TWT Setup Event */
-			/* FALLTHRU */
+			fallthrough;
 		default:
-			brcmf_err("TWT: Setup EVENT: Negotiation Type %d not handled",
-				  twt_params.negotiation_type);
+			brcmf_err("TWT: Setup EVENT: Negotiation Type(%s) not handled",
+				  brcmf_twt_nego_type_str[twt_params.negotiation_type]);
 			ret = -EOPNOTSUPP;
 			goto exit;
 	}
 
 	/* Setup Event */
-	if (setup_desc->setup_cmd != IFX_TWT_OPER_SETUP_CMD_TYPE_ACCEPT) {
-		brcmf_err("TWT: Setup EVENT: Request not accepted by the AP");
-		goto exit;
-	}
 	twt_params.setup_cmd = setup_desc->setup_cmd;
-
-	/* Dialog Token */
-	twt_params.dialog_token = setup_event->dialog;
 
 	/* Flowflags */
 	twt_params.implicit = (setup_desc->flow_flags & BRCMF_TWT_FLOW_FLAG_IMPLICIT) ? 1 : 0;
@@ -527,42 +664,81 @@ brcmf_twt_setup_event_handler(struct brcmf_if *ifp, const struct brcmf_event_msg
 	brcmf_twt_u32_to_float(le32_to_cpu(setup_desc->wake_int),
 			       &twt_params.exponent, &twt_params.mantissa);
 
-	/* Lookup the session list for the received flow ID */
-	twt_sess = brcmf_itwt_lookup_session_by_flowid(ifp, twt_params.flow_id);
-	if (twt_sess)
-		ret = brcmf_twt_update_session(ifp, twt_sess, e->addr,
-					       BRCMF_TWT_SESS_STATE_SETUP_COMPLETE,
-					       &twt_params);
-	else
-		ret = brcmf_twt_add_session(ifp, e->addr,
-					    BRCMF_TWT_SESS_STATE_SETUP_COMPLETE,
-					    &twt_params);
+	brcmf_dbg(TWT, "TWT: Setup EVENT: %sResponse with cmd(%s) from peer %pM",
+		  unsolicited_setup ? "Un-Solicited " : "",
+		  brcmf_twt_setup_cmd_str[setup_desc->setup_cmd], e->addr);
 
-	if (ret) {
-		brcmf_err("TWT: Setup EVENT: Failed to update session");
+	switch (setup_desc->setup_cmd) {
+	case TWT_SETUP_CMD_REQUEST:
+		fallthrough;
+	case TWT_SETUP_CMD_SUGGEST:
+		fallthrough;
+	case TWT_SETUP_CMD_DEMAND:
+		fallthrough;
+	case TWT_SETUP_CMD_GROUPING:
+		ret = -EOPNOTSUPP;
+		goto exit;
+	case TWT_SETUP_CMD_ACCEPT:
+		if (!twt_sess)
+			ret = brcmf_twt_add_session(ifp, e->addr,
+						    BRCMF_TWT_SESS_STATE_SETUP_COMPLETE,
+						    &twt_params);
+		else
+			ret = brcmf_twt_update_session(ifp, twt_sess, e->addr,
+						       BRCMF_TWT_SESS_STATE_SETUP_COMPLETE,
+						       &twt_params);
+		break;
+	case TWT_SETUP_CMD_ALTERNATE:
+		fallthrough;
+	case TWT_SETUP_CMD_DICTATE:
+		ret = -EOPNOTSUPP;
+		goto exit;
+	case TWT_SETUP_CMD_REJECT:
+		if (!twt_sess)
+			/* Bail out, since nothing to handle on receiving Un-Solicited
+			 * Reject from the TWT peer for an un-available TWT session.
+			 */
+			break;
+
+		ret = brcmf_twt_update_session_state(ifp, twt_sess,
+						     BRCMF_TWT_SESS_STATE_SETUP_INCOMPLETE);
+		if (ret) {
+			brcmf_err("TWT: Setup EVENT: Failed to update session(%u) with state(%s)",
+				  twt_params.flow_id,
+				  brcmf_twt_session_state_str[BRCMF_TWT_SESS_STATE_SETUP_INCOMPLETE]);
+			goto exit;
+		}
+
+		ret = brcmf_twt_del_session(ifp, twt_sess);
+
+		break;
+	default:
+		ret = -EOPNOTSUPP;
 		goto exit;
 	}
 
-	brcmf_dbg(TWT, "TWT: Setup EVENT: Session Setup Complete\n"
-		  "Setup command	: %u\n"
-		  "Flow flags		: 0x %02x\n"
-		  "Flow ID		: %u\n"
-		  "Broadcast TWT ID	: %u\n"
-		  "Wake Time H,L	: 0x %08x %08x\n"
-		  "Wake Type		: %u\n"
-		  "Wake Duration	: %u uS\n"
-		  "Wake Interval	: %u uS\n"
-		  "Negotiation type	: %u\n",
-		  setup_desc->setup_cmd,
-		  setup_desc->flow_flags,
-		  setup_desc->flow_id,
-		  setup_desc->bid,
-		  setup_desc->wake_time_h,
-		  setup_desc->wake_time_l,
-		  setup_desc->wake_type,
-		  setup_desc->wake_dur,
-		  setup_desc->wake_int,
-		  setup_desc->negotiation_type);
+	if (ret) {
+		brcmf_err("TWT: Setup EVENT: Failed to add/update/del session(%u) with peer %pM",
+			  twt_params.flow_id, e->addr);
+		goto exit;
+	}
+
+	brcmf_dbg(TWT, "TWT: Setup EVENT: Session %s\n"
+		  "Dialog Token         : %u\n"
+		  "Setup command        : %s\n"
+		  "Flow flags           : 0x %02x\n"
+		  "Flow ID              : %u\n"
+		  "Broadcast TWT ID     : %u\n"
+		  "Wake Time H,L        : 0x %08x %08x\n"
+		  "Wake Type            : %u\n"
+		  "Wake Duration        : %u uS\n"
+		  "Wake Interval        : %u uS\n"
+		  "Negotiation type     : %s\n",
+		  brcmf_twt_session_state_str[twt_sess->state], setup_event->dialog,
+		  brcmf_twt_setup_cmd_str[setup_desc->setup_cmd], setup_desc->flow_flags,
+		  setup_desc->flow_id, setup_desc->bid, setup_desc->wake_time_h,
+		  setup_desc->wake_time_l, setup_desc->wake_type, setup_desc->wake_dur,
+		  setup_desc->wake_int, brcmf_twt_nego_type_str[setup_desc->negotiation_type]);
 exit:
 	return ret;
 }
@@ -578,13 +754,14 @@ exit:
  */
 static s32
 brcmf_twt_teardown_event_handler(struct brcmf_if *ifp, const struct brcmf_event_msg *e,
-				void *data)
+				 void *data)
 {
 	struct brcmf_twt_teardown_event *teardown_event;
 	struct brcmf_twt_teardesc *teardown_desc;
 	struct brcmf_twt_session *twt_sess = NULL;
 	struct brcmf_twt_params twt_params;
-	s32 ret;
+	bool unsolicited_teardown = false;
+	s32 ret = 0;
 
 	teardown_event = (struct brcmf_twt_teardown_event *)data;
 	teardown_desc = (struct brcmf_twt_teardesc *)
@@ -607,45 +784,59 @@ brcmf_twt_teardown_event_handler(struct brcmf_if *ifp, const struct brcmf_event_
 
 		/* Lookup the session list for the received flow ID */
 		twt_sess = brcmf_itwt_lookup_session_by_flowid(ifp, twt_params.flow_id);
-		if (twt_sess) {
-			ret = brcmf_twt_update_session_state(ifp, twt_sess,
-							     BRCMF_TWT_SESS_STATE_TEARDOWN_COMPLETE);
-			if (ret) {
-				brcmf_err("TWT: Failed to update session state");
-				goto exit;
-			}
 
-			ret = brcmf_twt_del_session(ifp, twt_sess);
-			if (ret) {
-				brcmf_err("TWT: Failed to Delete session from list");
-				goto exit;
-			}
-		} else {
-			brcmf_dbg(TWT, "TWT: session is not available to delete");
-			ret = -EINVAL;
-			goto exit;
-		}
+		/* If this device requested for session Teardown, a session entry with
+		 * state(setup inprogess) would be already available, else this is an
+		 * Unsolicited Teardown Response from the peer TWT device.
+		 */
+		if (!twt_sess || twt_sess->state != BRCMF_TWT_SESS_STATE_SETUP_INPROGRESS)
+			unsolicited_teardown = true;
+
 		break;
 	case IFX_TWT_PARAM_NEGO_TYPE_BTWT:
 		/* Broadcast TWT ID */
 		twt_params.bcast_twt_id = teardown_desc->bid;
 
 		/* TODO: Handle the Broadcast TWT Teardown Event */
-		/* FALLTHRU */
+		fallthrough;
 	default:
-		brcmf_err("TWT: Negotiation Type not handled\n");
+		brcmf_err("TWT: Teardown EVENT: Negotiation Type(%s) not handled\n",
+			  brcmf_twt_nego_type_str[twt_params.negotiation_type]);
 		ret = -EOPNOTSUPP;
 		goto exit;
 	}
 
-	brcmf_dbg(TWT, "TWT: Teardown EVENT: Session Teardown Complete\n"
-		  "Flow ID		: %u\n"
-		  "Broadcast TWT ID	: %u\n"
-		  "Negotiation type	: %u\n"
-		  "Teardown all TWT	: %u\n",
-		  teardown_desc->flow_id,
-		  teardown_desc->bid,
-		  teardown_desc->negotiation_type,
+	brcmf_dbg(TWT, "TWT: Teardown EVENT: %sResponse from peer %pM",
+		  unsolicited_teardown ? "Un-Solicited " : "", e->addr);
+
+	if (!twt_sess) {
+		brcmf_dbg(TWT, "TWT: Teardown EVENT: Un-available session(%u) for deletion",
+			  twt_params.flow_id);
+		ret = -EINVAL;
+		goto exit;
+	}
+
+	ret = brcmf_twt_update_session_state(ifp, twt_sess, BRCMF_TWT_SESS_STATE_TEARDOWN_COMPLETE);
+	if (ret) {
+		brcmf_err("TWT: Teardown EVENT: Failed to update session(%u) with state(%s)",
+			  twt_params.flow_id,
+			  brcmf_twt_session_state_str[BRCMF_TWT_SESS_STATE_TEARDOWN_COMPLETE]);
+		goto exit;
+	}
+
+	ret = brcmf_twt_del_session(ifp, twt_sess);
+	if (ret) {
+		brcmf_err("TWT: Teardown EVENT: Failed to Delete session from list");
+		goto exit;
+	}
+
+	brcmf_dbg(TWT, "TWT: Teardown EVENT: Session %s\n"
+		  "Flow ID              : %u\n"
+		  "Broadcast TWT ID     : %u\n"
+		  "Negotiation type     : %s\n"
+		  "Teardown all TWT     : %u\n",
+		  brcmf_twt_session_state_str[twt_sess->state], teardown_desc->flow_id,
+		  teardown_desc->bid, brcmf_twt_nego_type_str[teardown_desc->negotiation_type],
 		  teardown_desc->alltwt);
 exit:
 	return ret;
@@ -734,8 +925,8 @@ brcmf_twt_setup_oper_handler(struct brcmf_if *ifp, struct brcmf_twt_params twt_p
 			twt_sess = brcmf_itwt_lookup_session_by_flowid(ifp,
 								       twt_params.flow_id);
 			if (twt_sess) {
-				brcmf_err("TWT: Setup REQ: Skipping, "
-					  "session with flow ID %d current state %s",
+				brcmf_err("TWT: Setup REQ: Skipping, since session(%u) entry is "
+					  "already available with current state(%s)",
 					  twt_params.flow_id,
 					  brcmf_twt_session_state_str[twt_sess->state]);
 				ret = -EINVAL;
@@ -756,10 +947,10 @@ brcmf_twt_setup_oper_handler(struct brcmf_if *ifp, struct brcmf_twt_params twt_p
 		val.sdesc.bid = twt_params.bcast_twt_id;
 
 		/* TODO: Handle the Broadcast TWT Setup REQ */
-		/* FALLTHRU */
+		fallthrough;
 	default:
-		brcmf_err("TWT: Setup REQ: Negotiation Type %d not handled",
-			  twt_params.negotiation_type);
+		brcmf_err("TWT: Setup REQ: Negotiation Type(%s) not handled",
+			  brcmf_twt_nego_type_str[twt_params.negotiation_type]);
 		ret = -EOPNOTSUPP;
 		goto exit;
 	}
@@ -803,46 +994,47 @@ brcmf_twt_setup_oper_handler(struct brcmf_if *ifp, struct brcmf_twt_params twt_p
 	val.sdesc.wake_int = cpu_to_le32(brcmf_twt_float_to_u32(twt_params.exponent,
 							       twt_params.mantissa));
 
+	/* Override Dialog Token passed from userpace with next available value in Driver */
+	twt_params.dialog_token = brcmf_twt_get_next_dialog_token();
+	val.dialog = cpu_to_le16((u16)twt_params.dialog_token);
+
 	/* Send the TWT Setup request to Firmware */
 	ret = brcmf_fil_xtlv_data_set(ifp, "twt", BRCMF_TWT_CMD_SETUP,
 				      (void *)&val, sizeof(val));
 	if (ret < 0) {
-		brcmf_err("TWT: Setup REQ: Failed, ret: %d", ret);
+		brcmf_err("TWT: Setup REQ: Failed, Firmware error(%d)", ret);
 		goto exit;
 	}
 
-	/* Add an entry setup with progress state if flow ID is specified */
-	if (twt_params.flow_id != 0xFF) {
-		ret = brcmf_twt_add_session(ifp, vif->profile.bssid,
-					    BRCMF_TWT_SESS_STATE_SETUP_INPROGRESS,
-					    &twt_params);
-		if (ret < 0) {
-			brcmf_err("TWT: Setup EVENT: Failed to add session");
-			goto exit;
-		}
+	/* Add an entry setup with progress state */
+	ret = brcmf_twt_add_session(ifp, vif->profile.bssid,
+				    BRCMF_TWT_SESS_STATE_SETUP_INPROGRESS,
+				    &twt_params);
+	if (ret < 0) {
+		brcmf_err("TWT: Setup REQ: Failed to add session");
+		goto exit;
 	}
 
+	/* Schedule the Cleanup timer to handle Setup Completion timeout */
+	mod_timer(&ifp->twt_evt_timeout, jiffies + BRCMF_TWT_EVENT_TIMEOUT);
 
-	brcmf_dbg(TWT, "TWT: Setup REQ: Session Setup In Progress\n"
-		  "Setup command	: %u\n"
-		  "Flow flags		: 0x %02x\n"
-		  "Flow ID		: %u\n"
-		  "Broadcast TWT ID	: %u\n"
-		  "Wake Time H,L	: 0x %08x %08x\n"
-		  "Wake Type		: %u\n"
-		  "Wake Duration	: %u uS\n"
-		  "Wake Interval	: %u uS\n"
-		  "Negotiation type	: %u\n",
-		  val.sdesc.setup_cmd,
-		  val.sdesc.flow_flags,
-		  val.sdesc.flow_id,
-		  val.sdesc.bid,
-		  val.sdesc.wake_time_h,
-		  val.sdesc.wake_time_l,
-		  val.sdesc.wake_type,
-		  val.sdesc.wake_dur,
-		  val.sdesc.wake_int,
-		  val.sdesc.negotiation_type);
+	brcmf_dbg(TWT, "TWT: Setup REQ: Session %s\n"
+		  "Dialog Token         : %u\n"
+		  "Setup command        : %s\n"
+		  "Flow flags           : 0x %02x\n"
+		  "Flow ID              : %u\n"
+		  "Broadcast TWT ID     : %u\n"
+		  "Wake Time H,L        : 0x %08x %08x\n"
+		  "Wake Type            : %u\n"
+		  "Wake Duration        : %u uS\n"
+		  "Wake Interval        : %u uS\n"
+		  "Negotiation type     : %s\n",
+		  brcmf_twt_session_state_str[BRCMF_TWT_SESS_STATE_SETUP_INPROGRESS],
+		  val.dialog, brcmf_twt_setup_cmd_str[val.sdesc.setup_cmd],
+		  val.sdesc.flow_flags, val.sdesc.flow_id, val.sdesc.bid,
+		  val.sdesc.wake_time_h, val.sdesc.wake_time_l, val.sdesc.wake_type,
+		  val.sdesc.wake_dur, val.sdesc.wake_int,
+		  brcmf_twt_nego_type_str[val.sdesc.negotiation_type]);
 exit:
 	return ret;
 }
@@ -894,7 +1086,7 @@ brcmf_twt_teardown_oper_handler(struct brcmf_if *ifp, struct brcmf_twt_params tw
 			twt_sess = brcmf_itwt_lookup_session_by_flowid(ifp, twt_params.flow_id);
 			if ((twt_sess == NULL) ||
 			    (twt_sess->state != BRCMF_TWT_SESS_STATE_SETUP_COMPLETE)) {
-				brcmf_err("TWT: Teardown REQ: flow ID: %d is not active",
+				brcmf_err("TWT: Teardown REQ: session(%u) is not active",
 					  twt_params.flow_id);
 				ret = -EINVAL;
 				goto exit;
@@ -902,7 +1094,7 @@ brcmf_twt_teardown_oper_handler(struct brcmf_if *ifp, struct brcmf_twt_params tw
 		} else if (twt_params.flow_id == 0xFF) {
 			val.teardesc.flow_id = twt_params.flow_id;
 		} else {
-			brcmf_err("TWT: Teardown REQ: flow ID: %d is invalid",
+			brcmf_err("TWT: Teardown REQ: session(%u) is invalid",
 				  twt_params.flow_id);
 			ret = -EINVAL;
 			goto exit;
@@ -913,10 +1105,10 @@ brcmf_twt_teardown_oper_handler(struct brcmf_if *ifp, struct brcmf_twt_params tw
 		val.teardesc.bid = twt_params.bcast_twt_id;
 
 		/* TODO: Handle the Broadcast TWT Teardown REQ */
-		/* FALLTHRU */
+		fallthrough;
 	default:
-		brcmf_err("TWT: Teardown REQ: Negotiation Type %d not handled",
-			  twt_params.negotiation_type);
+		brcmf_err("TWT: Teardown REQ: Negotiation Type(%s) not handled",
+			  brcmf_twt_nego_type_str[twt_params.negotiation_type]);
 		ret = -EOPNOTSUPP;
 		goto exit;
 	}
@@ -925,20 +1117,44 @@ brcmf_twt_teardown_oper_handler(struct brcmf_if *ifp, struct brcmf_twt_params tw
 	ret = brcmf_fil_xtlv_data_set(ifp, "twt", BRCMF_TWT_CMD_TEARDOWN,
 				      (void *)&val, sizeof(val));
 	if (ret < 0) {
-		brcmf_err("TWT: Teardown REQ: Failed, ret: %d", ret);
+		brcmf_err("TWT: Teardown REQ: Failed, Firmware error(%d)", ret);
 		goto exit;
 	}
 
-	brcmf_twt_update_session_state(ifp, twt_sess,
-				       BRCMF_TWT_SESS_STATE_TEARDOWN_INPROGRESS);
-	brcmf_dbg(TWT, "TWT: Teardown REQ: Session Teardown In Progress\n"
-		  "Flow ID		: %u\n"
-		  "Broadcast TWT ID	: %u\n"
-		  "Negotiation type	: %u\n"
-		  "Teardown all TWT	: %u\n",
-		  val.teardesc.flow_id,
-		  val.teardesc.bid,
-		  val.teardesc.negotiation_type,
+	list_for_each_entry(twt_sess, &ifp->twt_sess_list, list) {
+		/* Skip updating the state of this session to "Teardown inprogress"
+		 * on one of the following cases
+		 *	1. The "Teardown all" session action is not requested by userspace.
+		 *	2. This session's Flow ID is not explcitly requested for Teardown.
+		 *	3. This session's state is not "setup complete".
+		 *	   i.e, it is not already active to teardown.
+		 */
+		if (!twt_params.teardown_all_twt ||
+		    twt_params.flow_id != twt_sess->twt_params.flow_id ||
+		    twt_sess->state != BRCMF_TWT_SESS_STATE_SETUP_COMPLETE)
+			continue;
+
+		ret = brcmf_twt_update_session_state(ifp, twt_sess,
+						     BRCMF_TWT_SESS_STATE_TEARDOWN_INPROGRESS);
+		if (ret) {
+			brcmf_err("TWT: Teardown REQ: Failed to update session(%u) with state(%s)",
+				  twt_params.flow_id,
+				  brcmf_twt_session_state_str[BRCMF_TWT_SESS_STATE_TEARDOWN_INPROGRESS]);
+			goto exit;
+		}
+	}
+
+	/* Schedule the Cleanup timer to handle Teardown Completion timeout */
+	mod_timer(&ifp->twt_evt_timeout, jiffies + BRCMF_TWT_EVENT_TIMEOUT);
+
+	brcmf_dbg(TWT, "TWT: Teardown REQ: Session %s\n"
+		  "Flow ID              : %u\n"
+		  "Broadcast TWT ID     : %u\n"
+		  "Negotiation type     : %s\n"
+		  "Teardown all TWT     : %u\n",
+		  brcmf_twt_session_state_str[BRCMF_TWT_SESS_STATE_TEARDOWN_INPROGRESS],
+		  val.teardesc.flow_id, val.teardesc.bid,
+		  brcmf_twt_nego_type_str[val.teardesc.negotiation_type],
 		  val.teardesc.alltwt);
 exit:
 	return ret;
@@ -975,25 +1191,31 @@ brcmf_twt_oper(struct wiphy *wiphy, struct wireless_dev *wdev,
 
 	/* Check if TWT feature is supported in the Firmware */
 	if (!brcmf_feat_is_enabled(ifp, BRCMF_FEAT_TWT)) {
-		brcmf_err("TWT: REQ: Operation %d can't be handled, TWT not enabled",
-			  twt_params.twt_oper);
+		brcmf_err("TWT: REQ: Operation(%s) can't be handled, TWT not enabled on VIF(%s)",
+			  brcmf_twt_oper_str[twt_params.twt_oper], brcmf_ifname(ifp));
 		ret = -EOPNOTSUPP;
 		goto exit;
 	}
 
-	/* Check if vif is operating in Station Mode */
-	if (wdev->iftype != NL80211_IFTYPE_STATION) {
-		brcmf_err("TWT: REQ: Operation %d can't be handled, vif is not STA",
-			  twt_params.twt_oper);
-		ret = -EOPNOTSUPP;
-		goto exit;
-	}
+	/* Check VIF operating Mode */
+	switch (wdev->iftype) {
+	case NL80211_IFTYPE_STATION:
+		if (!test_bit(BRCMF_VIF_STATUS_CONNECTED, &vif->sme_state)) {
+			brcmf_err("TWT: REQ: Operation(%s) invalid when VIF(%s) not connected with WLAN peer",
+				  brcmf_twt_oper_str[twt_params.twt_oper], brcmf_ifname(ifp));
+			ret = -ENOTCONN;
+			goto exit;
+		}
 
-	/* Check if the interface is associated with another WLAN device */
-	if (!test_bit(BRCMF_VIF_STATUS_CONNECTED, &vif->sme_state)) {
-		brcmf_err("TWT: REQ: Operation %d can't be handled, vif not connected with WLAN peer",
-			  twt_params.twt_oper);
-		ret = -ENOTCONN;
+		break;
+	case NL80211_IFTYPE_AP:
+		/* TODO: Handle the TWT operation requests for AP Mode */
+		fallthrough;
+	default:
+		brcmf_err("TWT: REQ: Operation(%s) not supported on VIF(%s) mode(%u)",
+			  brcmf_twt_oper_str[twt_params.twt_oper], brcmf_ifname(ifp),
+			  wdev->iftype);
+		ret = -EOPNOTSUPP;
 		goto exit;
 	}
 
@@ -1006,8 +1228,8 @@ brcmf_twt_oper(struct wiphy *wiphy, struct wireless_dev *wdev,
 			ret = brcmf_twt_teardown_oper_handler(ifp, twt_params);
 			break;
 		default:
-			brcmf_err("TWT: REQ: Operation %d not supported",
-				  twt_params.twt_oper);
+			brcmf_err("TWT: REQ: Operation(%s) not supported on VIF(%s)",
+				  brcmf_twt_oper_str[twt_params.twt_oper], brcmf_ifname(ifp));
 			ret = -EOPNOTSUPP;
 			goto exit;
 	}

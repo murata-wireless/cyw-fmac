@@ -32,6 +32,8 @@
 #ifndef BRCMF_TWT_H
 #define BRCMF_TWT_H
 
+#include <linux/sched.h>
+#include <linux/jiffies.h>
 #include "vendor_ifx.h"
 #include "core.h"
 
@@ -40,6 +42,7 @@
 /* Min TWT Unit in TUs */
 #define WAKE_DUR_UNIT_TU 1024
 
+#define BRCMF_TWT_EVENT_TIMEOUT	msecs_to_jiffies(3000)
 /**
  * enum brcmf_twt_cmd - TWT iovar subcmds handled by firmware TWT module
  *
@@ -88,10 +91,14 @@ enum brcmf_twt_flow_flag {
  * @BRCMF_TWT_SESS_STATE_UNSPEC: Reserved value 0.
  * @BRCMF_TWT_SESS_STATE_SETUP_INPROGRESS: TWT session setup request was sent
  *	to the Firmware.
+ * @BRCMF_TWT_SESS_STATE_SETUP_INCOMPLETE: TWT session setup is incomplete,
+ *	because either the TWT peer did not send a response, or sent a Reject
+ *	response driver received a Reject Setup event from the Firmware.
  * @BRCMF_TWT_SESS_STATE_SETUP_COMPLETE: TWT session setup is complete and received
- * 	setup event from the Firmweare.
+ *	setup event from the Firmware.
  * @BRCMF_TWT_SESS_STATE_TEARDOWN_INPROGRESS: TWT session teardown request was sent
  *	to the Firmware.
+ * @BRCMF_TWT_SESS_STATE_TEARDOWN_INCOMPLETE: TWT session teardown event timed out.
  * @BRCMF_TWT_SESS_STATE_TEARDOWN_COMPLETE: TWT session teardown is complete and
  *	received Teardown event from the Firmware.
  * @BRCMF_TWT_SESS_STATE_MAX: This acts as a the tail of state list.
@@ -100,8 +107,10 @@ enum brcmf_twt_flow_flag {
 enum brcmf_twt_session_state {
 	BRCMF_TWT_SESS_STATE_UNSPEC,
 	BRCMF_TWT_SESS_STATE_SETUP_INPROGRESS,
+	BRCMF_TWT_SESS_STATE_SETUP_INCOMPLETE,
 	BRCMF_TWT_SESS_STATE_SETUP_COMPLETE,
 	BRCMF_TWT_SESS_STATE_TEARDOWN_INPROGRESS,
+	BRCMF_TWT_SESS_STATE_TEARDOWN_INCOMPLETE,
 	BRCMF_TWT_SESS_STATE_TEARDOWN_COMPLETE,
 	BRCMF_TWT_SESS_STATE_MAX
 };
@@ -160,6 +169,7 @@ struct brcmf_twt_params {
  * @peer: TWT peer address.
  * @state: TWT session state, refer enum brcmf_twt_session_state.
  * @twt_params: TWT session parameters.
+ * @oper_req_ts: TWT session operation (setup, teardown, etc..) start timestamp.
  * @list: linked list.
  */
 struct brcmf_twt_session {
@@ -168,6 +178,7 @@ struct brcmf_twt_session {
 	struct ether_addr peer_addr;
 	enum brcmf_twt_session_state state;
 	struct brcmf_twt_params twt_params;
+	unsigned long oper_start_ts;
 	struct list_head list;
 };
 
@@ -258,6 +269,7 @@ struct brcmf_twt_setup_oper {
 	struct ether_addr peer;
 	u8 pad[2];
 	struct brcmf_twt_sdesc sdesc;
+	u16 dialog;
 };
 
 /**
@@ -317,6 +329,12 @@ void brcmf_twt_debugfs_create(struct brcmf_pub *drvr);
  * @ifp: interface instatnce.
  */
 s32 brcmf_twt_cleanup_sessions(struct brcmf_if *ifp);
+
+/**
+ * brcmf_twt_event_timeout_handler - Iterate the session list and handle stale
+ *	TWT session entries which are failed to move to next state in FSM.
+ */
+void brcmf_twt_event_timeout_handler(struct timer_list *t);
 
 /**
  * brcmf_notify_twt_event() - Handle the TWT Event notifications from Firmware.
