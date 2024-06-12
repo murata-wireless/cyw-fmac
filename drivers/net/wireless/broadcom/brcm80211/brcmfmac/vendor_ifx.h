@@ -107,6 +107,12 @@ struct bcm_iov_buf {
  * @IFX_VENDOR_SCMD_WNM: Configure the Wireless Network Management (WNM) 802.11v functionaltiy
  *	related parameters.
  *
+ * @IFX_VENDOR_SCMD_HWCAPS: Get device's capability.
+ *
+ * @IFX_VENDOR_SCMD_CMDSTR: New vendor string infra subcmd to handle user supplied strings.
+ *	String parsing and calling corresponding function handler for a specific command
+ *	given by user.
+ *
  * @IFX_VENDOR_SCMD_MAX: This acts as a the tail of cmds list.
  *      Make sure it located at the end of the list.
  */
@@ -137,7 +143,10 @@ enum ifx_nl80211_vendor_subcmds {
 	SCMD(RSV22)		= 23,
 	SCMD(RSV24)		= 24,
 	SCMD(WNM)		= 25,
-	SCMD(MAX)		= 26
+	SCMD(HWCAPS)		= 26,
+	SCMD(WNM_WL_CAP)	= 27,
+	SCMD(CMDSTR)		= 28,
+	SCMD(MAX)		= 29
 };
 
 /*
@@ -631,6 +640,15 @@ enum ifx_vendor_attr_wnm {
 	IFX_VENDOR_ATTR_WNM_MAX
 };
 
+enum ifx_vendor_hw_caps {
+	IFX_VENDOR_HW_CAPS_REPLAYCNTS,
+	IFX_VENDOR_HW_CAPS_MAX
+};
+
+static const char * const hw_caps_name[] = {
+	[IFX_VENDOR_HW_CAPS_REPLAYCNTS] = "replay counters"
+};
+
 static const struct nla_policy ifx_vendor_attr_wnm_policy[IFX_VENDOR_ATTR_WNM_MAX + 1] = {
 	[IFX_VENDOR_ATTR_WNM_UNSPEC] = {.type = NLA_U8},
 	[IFX_VENDOR_ATTR_WNM_CMD] = {.type = NLA_U8},
@@ -682,6 +700,51 @@ struct ifx_maxidle_wnm {
 	int protect;
 };
 
+#define WL_MKEEP_ALIVE_VERSION		1
+#define WL_MKEEP_ALIVE_IMMEDIATE	0x80000000
+
+struct ifx_mkeep_alive {
+	u16 version;		/* Version for mkeep_alive */
+	u16 length;		/* length of fixed parameters in the structure */
+	u32 period_msec;	/* high bit on means immediate send */
+	u16 len_bytes;
+	u8 keep_alive_id;	/* 0 - 3 for N = 4 */
+	u8 data[1];
+};
+
+struct ifx_tko {
+	u16 subcmd_id;		/* subcommand id */
+	u16 len;		/* total length of data[] */
+	u8 data[1];		/* subcommand data */
+};
+
+/* subcommand ids */
+#define WL_TKO_SUBCMD_ENABLE		3	/* enable/disable */
+
+struct ifx_tko_enable {
+	u8 enable;		/* 1 - enable, 0 - disable */
+	u8 pad[3];		/* 4-byte struct alignment */
+};
+
+/* String based vendor commands infra
+ */
+#define VNDR_CMD_STR_NUM	15
+#define VNDR_CMD_STR_MAX_LEN	20
+#define VNDR_CMD_VAL_NUM	15
+#define VNDR_CMD_HASH_BITS	4
+
+struct ifx_vendor_cmdstr {
+	const char *name;
+	int (*func)(struct wiphy *wiphy, struct wireless_dev *wdev,
+		    char cmd_str[VNDR_CMD_STR_NUM][VNDR_CMD_STR_MAX_LEN],
+		    long cmd_val[VNDR_CMD_VAL_NUM]);
+};
+
+struct ifx_vndr_cmdstr_hashtbl {
+	struct ifx_vendor_cmdstr *vndr_cmd_addr;
+	struct hlist_node node;
+};
+
 int ifx_cfg80211_vndr_cmds_twt(struct wiphy *wiphy,
 			       struct wireless_dev *wdev, const void  *data, int len);
 int ifx_cfg80211_vndr_cmds_bsscolor(struct wiphy *wiphy,
@@ -711,8 +774,25 @@ int ifx_cfg80211_vndr_cmds_mpc(struct wiphy *wiphy,
 int ifx_cfg80211_vndr_cmds_giantrx(struct wiphy *wiphy,
 				   struct wireless_dev *wdev,
 				   const void *data, int len);
-int ifx_cfg80211_vndr_cmds_wnm(struct wiphy *wiphy,
-			       struct wireless_dev *wdev,
+int ifx_cfg80211_vndr_cmds_wnm_max_idle(struct wiphy *wiphy,
+					struct wireless_dev *wdev,
+					const void *data, int len);
+int ifx_cfg80211_vndr_cmds_hwcaps(struct wiphy *wiphy,
+				  struct wireless_dev *wdev,
+				  const void *data, int len);
+int ifx_cfg80211_vndr_cmds_wnm_wl_cap(struct wiphy *wiphy,
+				      struct wireless_dev *wdev,
+				      const void *data, int len);
+int ifx_vndr_cmdstr_offload_config(struct wiphy *wiphy, struct wireless_dev *wdev,
+				   char cmd_str[VNDR_CMD_STR_NUM][VNDR_CMD_STR_MAX_LEN],
+				   long cmd_val[VNDR_CMD_VAL_NUM]);
+int ifx_vndr_cmdstr_mkeep_alive(struct wiphy *wiphy, struct wireless_dev *wdev,
+				char cmd_str[VNDR_CMD_STR_NUM][VNDR_CMD_STR_MAX_LEN],
+				long *cmd_val);
+int ifx_vndr_cmdstr_tko(struct wiphy *wiphy, struct wireless_dev *wdev,
+			char cmd_str[VNDR_CMD_STR_NUM][VNDR_CMD_STR_MAX_LEN],
+			long *cmd_val);
+int ifx_cfg80211_vndr_cmds_str(struct wiphy *wiphy, struct wireless_dev *wdev,
 			       const void *data, int len);
 
 #endif /* IFX_VENDOR_H */

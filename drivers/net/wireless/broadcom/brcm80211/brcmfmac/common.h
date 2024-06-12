@@ -11,6 +11,22 @@
 
 #define BRCMF_FW_ALTPATH_LEN			256
 
+#define BRCMFMAC_DISABLE	0
+#define BRCMFMAC_ENABLE		1
+#define BRCMFMAC_AUTO		2
+
+/* Keeping these macro definition here because these are defined in mmc drivers.
+ * So for 3rd party mmc, fmac build should not fail due to build error.
+ */
+
+/* SDIO IDLECLOCK Support - reusing pm_caps */
+#ifndef SDIO_IDLECLOCK_DIS
+#define SDIO_IDLECLOCK_DIS	BIT(2)	/* Start SDClock */
+#define SDIO_IDLECLOCK_EN	BIT(3)	/* Stop SDClock */
+#define SDIO_SDMODE_1BIT	BIT(4)	/* Set 1-bit Bus mode */
+#define SDIO_SDMODE_4BIT	BIT(5)	/* Set 4-bit Bus mode */
+#endif /* !SDIO_IDLECLOCK_DIS */
+
 /* Definitions for the module global and device specific settings are defined
  * here. Two structs are used for them. brcmf_mp_global_t and brcmf_mp_device.
  * The mp_global is instantiated once in a global struct and gets initialized
@@ -48,12 +64,14 @@ extern struct brcmf_mp_global_t brcmf_mp_global;
  * @country_codes: If available, pointer to struct for translating country codes
  * @bus: Bus specific platform data. Only SDIO at the mmoment.
  * @pkt_prio: Support customer dscp to WMM up mapping.
+ * @idleclk_disable: SDIO bus clock output disable when bus is idle.
+ * @idle_time_zero: Set idle interval to zero.
  */
 struct brcmf_mp_device {
 	bool		p2p_enable;
 	unsigned int	feature_disable;
 	int		fcmode;
-	bool		roamoff;
+	unsigned int	roamoff;
 	bool		iapp;
 	bool		eap_restrict;
 	int		default_pm;
@@ -64,12 +82,34 @@ struct brcmf_mp_device {
 	bool		sdio_rxf_in_kthread_enabled;
 	unsigned int	offload_prof;
 	unsigned int	offload_feat;
+	bool		bt_over_sdio;
 	struct brcmfmac_pd_cc *country_codes;
 	const char	*board_type;
 	union {
 		struct brcmfmac_sdio_pd sdio;
 	} bus;
 	bool		pkt_prio;
+	int			idleclk_disable;
+	bool		idle_time_zero;
+};
+
+/**
+ * enum brcmf_roamoff_mode - using fw roaming and report event mode if not use it.
+ *
+ * @BRCMF_ROAMOFF_DISABLE: use firmware roaming engine
+ * @BRCMF_ROAMOFF_EN_BCNLOST_MSG:
+ *	don't use firmware roaming engine, and report to cfg80211 layer by BCNLOST_MSG event
+ * @BRCMF_ROAMOFF_EN_DISCONNECT_EVT:
+ *	don't use firmware roaming engine, and report to cfg80211 layer by DISCONNECT event
+ * @BRCMF_ROAMOFF_MAX:
+ *	for sanity checking purpose.
+ */
+
+enum brcmf_roamoff_mode {
+	BRCMF_ROAMOFF_DISABLE = 0,
+	BRCMF_ROAMOFF_EN_BCNLOST_MSG = 1,
+	BRCMF_ROAMOFF_EN_DISCONNECT_EVT = 2,
+	BRCMF_ROAMOFF_MAX
 };
 
 void brcmf_c_set_joinpref_default(struct brcmf_if *ifp);
@@ -77,6 +117,7 @@ void brcmf_c_set_joinpref_default(struct brcmf_if *ifp);
 struct brcmf_mp_device *brcmf_get_module_param(struct device *dev,
 					       enum brcmf_bus_type bus_type,
 					       u32 chip, u32 chiprev);
+int brcmf_debugfs_param_read(struct seq_file *s, void *data);
 void brcmf_release_module_param(struct brcmf_mp_device *module_param);
 
 /* Sets dongle media info (drv_version, mac address). */

@@ -37,8 +37,20 @@
 #define BRCMF_SDIO_REG_DAR_H2D_MSG_0	0x10030
 #define BRCMF_SDIO_REG_DAR_D2H_MSG_0	0x10038
 
+#define BRCMF_SDIO_REG_D2H_MSG_0	0x1800204C
+#define BRCMF_SDIO_REG_H2D_MSG_0	0x18002048
+
+#define CM3_SOCRAM_WRITE_END_LOCATION	0x80000
+
+/* Sdio rev 27 only */
+/* To read secure-mode bit */
+#define SBSDIO_FUNC1_SECURE_MODE	0x10001
+
 /* function 0 vendor specific CCCR registers */
 
+#define SDIO_CCCR_INTR_PND			0x05
+#define SDIO_CCCR_IO_ABORT			0x06
+#define SDIO_CCCR_IO_ABORT_RES			BIT(3)
 #define SDIO_CCCR_BRCM_CARDCAP			0xf0
 #define SDIO_CCCR_BRCM_CARDCAP_CMD14_SUPPORT	BIT(1)
 #define SDIO_CCCR_BRCM_CARDCAP_CMD14_EXT	BIT(2)
@@ -53,6 +65,7 @@
 
 #define SDIO_CCCR_BRCM_CARDCTRL			0xf1
 #define SDIO_CCCR_BRCM_CARDCTRL_WLANRESET	BIT(1)
+#define SDIO_CCCR_BRCM_CARDCTRL_BTRESET		BIT(2)
 
 #define SDIO_CCCR_BRCM_SEPINT			0xf2
 #define SDIO_CCCR_BRCM_SEPINT_MASK		BIT(0)
@@ -222,7 +235,9 @@ struct brcmf_ulp_event {
 struct brcmf_sdio_dev {
 	struct sdio_func *func1;
 	struct sdio_func *func2;
+	struct sdio_func *func3;
 	u32 sbwad;			/* Save backplane window address */
+	bool sbwad_valid;			/* Save backplane window address */
 	struct brcmf_core *cc_core;	/* chipcommon core info struct */
 	struct brcmf_sdio *bus;
 	struct device *dev;
@@ -245,6 +260,7 @@ struct brcmf_sdio_dev {
 	struct brcmf_sdiod_freezer *freezer;
 	struct brcmf_ulp fmac_ulp;
 	bool ulp;
+	bool redownload_fw;
 };
 
 /* sdio core registers */
@@ -359,6 +375,13 @@ void brcmf_sdiod_intr_unregister(struct brcmf_sdio_dev *sdiodev);
 #define brcmf_sdiod_writeb(sdiodev, addr, v, ret) \
 	sdio_writeb((sdiodev)->func1, (v), (addr), (ret))
 
+/* Accessors for SDIO specific function number */
+#define brcmf_sdiod_func_rb(func, addr, r) \
+	sdio_readb((func), (addr), (r))
+
+#define brcmf_sdiod_func_wb(func, addr, v, ret) \
+	sdio_writeb((func), (v), (addr), (ret))
+
 u32 brcmf_sdiod_readl(struct brcmf_sdio_dev *sdiodev, u32 addr, int *ret);
 void brcmf_sdiod_writel(struct brcmf_sdio_dev *sdiodev, u32 addr, u32 data,
 			int *ret);
@@ -376,10 +399,13 @@ void brcmf_sdiod_writel(struct brcmf_sdio_dev *sdiodev, u32 addr, u32 data,
  */
 int brcmf_sdiod_send_pkt(struct brcmf_sdio_dev *sdiodev,
 			 struct sk_buff_head *pktq);
-int brcmf_sdiod_send_buf(struct brcmf_sdio_dev *sdiodev, u8 *buf, uint nbytes);
+int brcmf_sdiod_send_buf(struct brcmf_sdio_dev *sdiodev, u8 fn,
+			 u8 *buf, uint nbytes);
 
-int brcmf_sdiod_recv_pkt(struct brcmf_sdio_dev *sdiodev, struct sk_buff *pkt);
-int brcmf_sdiod_recv_buf(struct brcmf_sdio_dev *sdiodev, u8 *buf, uint nbytes);
+int brcmf_sdiod_recv_pkt(struct brcmf_sdio_dev *sdiodev, u8 fn,
+			 struct sk_buff *pkt);
+int brcmf_sdiod_recv_buf(struct brcmf_sdio_dev *sdiodev, u8 fn,
+			 u8 *buf, uint nbytes);
 int brcmf_sdiod_recv_chain(struct brcmf_sdio_dev *sdiodev,
 			   struct sk_buff_head *pktq, uint totlen);
 
@@ -437,7 +463,11 @@ void brcmf_sdio_isr(struct brcmf_sdio *bus, bool in_isr);
 void brcmf_sdio_wd_timer(struct brcmf_sdio *bus, bool active);
 void brcmf_sdio_wowl_config(struct device *dev, bool enabled);
 int brcmf_sdio_sleep(struct brcmf_sdio *bus, bool sleep);
+int brcmf_sdio_set_sdbus_clk_width(struct brcmf_sdio *bus, unsigned int flags);
+int brcmf_sdio_clkctl(struct brcmf_sdio *bus, uint target, bool pendok);
+bool brcmf_sdio_bus_sleep_state(struct brcmf_sdio *bus);
 void brcmf_sdio_trigger_dpc(struct brcmf_sdio *bus);
+u32 brcmf_sdio_get_enum_addr(struct brcmf_sdio *bus);
 
 /* SHM offsets */
 #define M_DS1_CTRL_SDIO(ptr)	((ptr).ulp_shm_offset.m_ulp_ctrl_sdio)

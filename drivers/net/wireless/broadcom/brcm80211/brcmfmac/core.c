@@ -30,6 +30,8 @@
 #include "pcie.h"
 #include "common.h"
 #include "twt.h"
+#include "bt_shared_sdio_ifx.h"
+#include "sdio.h"
 
 #define MAX_WAIT_FOR_8021X_TX			msecs_to_jiffies(950)
 
@@ -663,8 +665,6 @@ void brcmf_netif_mon_rx(struct brcmf_if *ifp, struct sk_buff *skb)
 	skb_reset_mac_header(skb);
 	skb->pkt_type = PACKET_OTHERHOST;
 	skb->protocol = htons(ETH_P_802_2);
-
-	brcmf_netif_rx(ifp, skb);
 }
 
 static int brcmf_rx_hdrpull(struct brcmf_pub *drvr, struct sk_buff *skb,
@@ -683,6 +683,8 @@ static int brcmf_rx_hdrpull(struct brcmf_pub *drvr, struct sk_buff *skb,
 	}
 
 	skb->protocol = eth_type_trans(skb, (*ifp)->ndev);
+	brcmf_dbg(DATA, "protocol: 0x%04X\n", skb->protocol);
+
 	return 0;
 }
 
@@ -1363,7 +1365,7 @@ static int brcmf_inetaddr_changed(struct notifier_block *nb,
 	struct in_ifaddr *ifa = data;
 	struct net_device *ndev = ifa->ifa_dev->dev;
 	struct brcmf_if *ifp;
-	int idx, i, ret;
+	int idx, i = 0, ret;
 	u32 val;
 	__be32 addr_table[ARPOL_MAX_ENTRIES] = {0};
 
@@ -1613,6 +1615,10 @@ static int brcmf_bus_started(struct brcmf_pub *drvr, struct cfg80211_ops *ops)
 		goto fail;
 
 	brcmf_feat_attach(drvr);
+	ret = brcmf_bus_set_fcmode(bus_if);
+	/* Set fcmode = 0 for PCIe/USB */
+	if (ret < 0)
+		drvr->settings->fcmode = 0;
 
 	ret = brcmf_proto_init_done(drvr);
 	if (ret < 0)
@@ -1674,12 +1680,14 @@ static int brcmf_bus_started(struct brcmf_pub *drvr, struct cfg80211_ops *ops)
 
 	/* populate debugfs */
 	brcmf_debugfs_add_entry(drvr, "revinfo", brcmf_revinfo_read);
+	brcmf_debugfs_add_entry(drvr, "parameter", brcmf_debugfs_param_read);
 	debugfs_create_file("reset", 0600, brcmf_debugfs_get_devdir(drvr), drvr,
 			    &bus_reset_fops);
 	brcmf_feat_debugfs_create(drvr);
 	brcmf_proto_debugfs_create(drvr);
 	brcmf_bus_debugfs_create(bus_if);
 	brcmf_twt_debugfs_create(drvr);
+	ifx_btsdio_debugfs_create(drvr);
 
 	return 0;
 

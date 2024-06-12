@@ -89,6 +89,7 @@ struct brcmf_bus_ops {
 			  unsigned char *fw_name);
 	void (*debugfs_create)(struct device *dev);
 	int (*reset)(struct device *dev);
+	int (*set_fcmode)(struct device *dev);
 };
 
 
@@ -180,6 +181,10 @@ struct brcmf_bus {
 #ifdef CPTCFG_BRCMFMAC_BT_SHARED_SDIO
 	struct brcmf_bt_dev *bt_dev;
 #endif /* CPTCFG_BRCMFMAC_BT_SHARED_SDIO */
+#ifdef CPTCFG_IFX_BT_SHARED_SDIO
+	struct ifx_bt_if *bt_if;
+#endif /* CPTCFG_IFX_BT_SHARED_SDIO */
+
 };
 
 /*
@@ -270,6 +275,15 @@ int brcmf_bus_reset(struct brcmf_bus *bus)
 		return -EOPNOTSUPP;
 
 	return bus->ops->reset(bus->dev);
+}
+
+static inline
+int brcmf_bus_set_fcmode(struct brcmf_bus *bus)
+{
+	if (!bus->ops->set_fcmode)
+		return -EOPNOTSUPP;
+
+	return bus->ops->set_fcmode(bus->dev);
 }
 
 /*
