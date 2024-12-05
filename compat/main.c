@@ -73,7 +73,6 @@ static int __init backport_init(void)
 }
 subsys_initcall(backport_init);
 
-
 static void __exit backport_exit(void)
 {
 }

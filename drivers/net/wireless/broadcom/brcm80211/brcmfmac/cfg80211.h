@@ -12,6 +12,7 @@
 #include "core.h"
 #include "fwil_types.h"
 #include "p2p.h"
+#include "pno.h"
 
 #define BRCMF_SCAN_IE_LEN_MAX		2048
 
@@ -352,6 +353,23 @@ struct brcmf_cfg80211_wowl {
 	bool nd_enabled;
 };
 
+struct network_blob {
+	char ssid[IEEE80211_MAX_SSID_LEN];
+	u8 ssid_len;
+	int key_mgmt;
+	char psk[WSEC_MAX_PASSWORD_LEN];
+	char sae_password[WSEC_MAX_PASSWORD_LEN];
+	u8 proto;
+	u8 pairwise_cipher;
+	u8 frequency;
+};
+
+struct drv_config_pfn_params {
+	u8 pfn_config;
+	u8 count;
+	struct network_blob *network_blob_data;
+};
+
 /**
  * struct brcmf_cfg80211_info - dongle private data of cfg80211 interface
  *
@@ -422,6 +440,9 @@ struct brcmf_cfg80211_info {
 	u8 ac_priority[MAX_8021D_PRIO];
 	u8 pm_state;
 	u8 num_softap;
+	u8 pfn_enable;
+	u8 pfn_connection;
+	struct drv_config_pfn_params pfn_data;
 };
 
 /**
@@ -492,6 +513,8 @@ brcmf_cfg80211_connect_info *cfg_to_conn(struct brcmf_cfg80211_info *cfg)
 {
 	return &cfg->conn_info;
 }
+
+u8 nl80211_band_to_fwil(enum nl80211_band band);
 
 struct brcmf_cfg80211_info *brcmf_cfg80211_attach(struct brcmf_pub *drvr,
 						  struct cfg80211_ops *ops,

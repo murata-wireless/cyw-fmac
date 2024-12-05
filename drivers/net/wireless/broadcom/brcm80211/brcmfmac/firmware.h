@@ -11,6 +11,8 @@
 
 #define BRCMF_FW_DEFAULT_PATH		"brcm/"
 
+#define BRCMF_FW_MAX_BOARD_TYPES	8
+
 #define CY_FW_DEFAULT_PATH		"cypress/"
 
 /**
@@ -85,7 +87,7 @@ struct brcmf_fw_request {
 	u16 domain_nr;
 	u16 bus_nr;
 	u32 n_items;
-	const char *board_type;
+	const char *board_types[BRCMF_FW_MAX_BOARD_TYPES];
 	struct brcmf_fw_item items[];
 };
 
@@ -108,5 +110,14 @@ brcmf_fw_alloc_request(u32 chip, u32 chiprev,
 int brcmf_fw_get_firmwares(struct device *dev, struct brcmf_fw_request *req,
 			   void (*fw_cb)(struct device *dev, int err,
 					 struct brcmf_fw_request *req));
+
+/**
+ * Request single firmware synchronously.
+ * Callback is called on a valid request
+ * whether it succeeds or not.
+ */
+int brcmf_fw_get_firmware_sync(struct device *dev, struct brcmf_fw_request *req,
+			       void (*fw_cb)(struct device *dev, int err,
+					     struct brcmf_fw_request *req));
 
 #endif /* BRCMFMAC_FIRMWARE_H */

@@ -13,6 +13,7 @@
 #include <net/cfg80211.h>
 #include "fweh.h"
 #include "fwil_types.h"
+#include "feature.h"
 
 #define TOE_TX_CSUM_OL		0x00000001
 #define TOE_RX_CSUM_OL		0x00000002
@@ -92,6 +93,13 @@ struct brcmf_rev_info {
 	u32 nvramrev;
 };
 
+/** wlc interface version */
+struct brcmf_wlc_version {
+	/* wlc interface version numbers */
+	u16	wlc_ver_major;		/**< wlc interface major version number */
+	u16	wlc_ver_minor;		/**< wlc interface minor version number */
+};
+
 /* Common structure for module and instance linkage */
 struct brcmf_pub {
 	/* Linkage ponters */
@@ -122,11 +130,12 @@ struct brcmf_pub {
 	struct brcmf_ampdu_rx_reorder
 		*reorder_flows[BRCMF_AMPDU_RX_REORDER_MAXFLOWS];
 
-	u32 feat_flags;
+	u8 feat_flags[DIV_ROUND_UP(BRCMF_FEAT_LAST, 8)];
 	u32 chip_quirks;
 	int req_mpc;
 
 	struct brcmf_rev_info revinfo;
+	struct brcmf_wlc_version wlc_ver;
 #ifdef DEBUG
 	struct dentry *dbgfs_dir;
 #endif
@@ -233,7 +242,7 @@ void brcmf_remove_interface(struct brcmf_if *ifp, bool locked);
 void brcmf_txflowblock_if(struct brcmf_if *ifp,
 			  enum brcmf_netif_stop_reason reason, bool state);
 void brcmf_txfinalize(struct brcmf_if *ifp, struct sk_buff *txp, bool success);
-void brcmf_netif_rx(struct brcmf_if *ifp, struct sk_buff *skb);
+void brcmf_netif_rx(struct brcmf_if *ifp, struct sk_buff *skb, bool inirq);
 void brcmf_netif_mon_rx(struct brcmf_if *ifp, struct sk_buff *skb);
 void brcmf_net_detach(struct net_device *ndev, bool locked);
 int brcmf_net_mon_attach(struct brcmf_if *ifp);

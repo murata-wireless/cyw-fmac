@@ -6,7 +6,8 @@
 #ifndef BRCMFMAC_BUS_H
 #define BRCMFMAC_BUS_H
 
-#include <linux/skbuff.h>
+#include <linux/kernel.h>
+#include <linux/firmware.h>
 #include "debug.h"
 #include <linux/version.h>
 
@@ -42,6 +43,11 @@ enum brcmf_bus_protocol_type {
 	BRCMF_PROTO_MSGBUF
 };
 
+/* Firmware blobs that may be available */
+enum brcmf_blob_type {
+	BRCMF_BLOB_CLM,
+};
+
 struct brcmf_mp_device;
 
 struct brcmf_bus_dcmd {
@@ -68,7 +74,7 @@ struct brcmf_bus_dcmd {
  * @wowl_config: specify if dongle is configured for wowl when going to suspend
  * @get_ramsize: obtain size of device memory.
  * @get_memdump: obtain device memory dump in provided buffer.
- * @get_fwname: obtain firmware name.
+ * @get_blob: obtain a firmware blob.
  *
  * This structure provides an abstract interface towards the
  * bus specific driver. For control messages to common driver
@@ -85,8 +91,8 @@ struct brcmf_bus_ops {
 	void (*wowl_config)(struct device *dev, bool enabled);
 	size_t (*get_ramsize)(struct device *dev);
 	int (*get_memdump)(struct device *dev, void *data, size_t len);
-	int (*get_fwname)(struct device *dev, const char *ext,
-			  unsigned char *fw_name);
+	int (*get_blob)(struct device *dev, const struct firmware **fw,
+			enum brcmf_blob_type type);
 	void (*debugfs_create)(struct device *dev);
 	int (*reset)(struct device *dev);
 	int (*set_fcmode)(struct device *dev);
@@ -98,7 +104,7 @@ struct brcmf_bus_ops {
  *
  * @commonrings: commonrings which are always there.
  * @flowrings: commonrings which are dynamically created and destroyed for data.
- * @rx_dataoffset: if set then all rx data has this this offset.
+ * @rx_dataoffset: if set then all rx data has this offset.
  * @max_rxbufpost: maximum number of buffers to post for rx.
  * @max_flowrings: maximum number of tx flow rings supported.
  * @max_submissionrings: maximum number of submission rings(h2d) supported.
@@ -175,15 +181,16 @@ struct brcmf_bus {
 
 	const struct brcmf_bus_ops *ops;
 	struct brcmf_bus_msgbuf *msgbuf;
-#if (LINUX_VERSION_CODE < KERNEL_VERSION(4, 16, 0))
+#if (KERNEL_VERSION(4, 16, 0) > LINUX_VERSION_CODE)
 	bool allow_skborphan;
 #endif
 #ifdef CPTCFG_BRCMFMAC_BT_SHARED_SDIO
 	struct brcmf_bt_dev *bt_dev;
 #endif /* CPTCFG_BRCMFMAC_BT_SHARED_SDIO */
-#ifdef CPTCFG_IFX_BT_SHARED_SDIO
-	struct ifx_bt_if *bt_if;
-#endif /* CPTCFG_IFX_BT_SHARED_SDIO */
+#ifdef CPTCFG_INFFMAC_BT_SHARED_SDIO
+	struct inf_bt_if *bt_if;
+#endif /* CPTCFG_INFFMAC_BT_SHARED_SDIO */
+
 
 };
 
@@ -253,10 +260,10 @@ int brcmf_bus_get_memdump(struct brcmf_bus *bus, void *data, size_t len)
 }
 
 static inline
-int brcmf_bus_get_fwname(struct brcmf_bus *bus, const char *ext,
-			 unsigned char *fw_name)
+int brcmf_bus_get_blob(struct brcmf_bus *bus, const struct firmware **fw,
+		       enum brcmf_blob_type type)
 {
-	return bus->ops->get_fwname(bus->dev, ext, fw_name);
+	return bus->ops->get_blob(bus->dev, fw, type);
 }
 
 static inline

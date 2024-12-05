@@ -241,10 +241,16 @@ static inline bool ac_bitmap_tst(u8 bitmap, int prec)
 
 #define WPA3_AUTH_SAE_PSK	0x40000	/* SAE with 4-way handshake */
 #define WPA3_AUTH_SAE_FBT       0x80000 /* FT authentication over SAE */
+#define WPA3_AUTH_SAE_FT_1X	0x2000000 /* SAE with FT 1X */
 #define WPA3_AUTH_OWE		0x100000 /* OWE */
 #define WFA_AUTH_DPP		0x200000 /* WFA DPP AUTH */
 #define WPA3_AUTH_1X_SUITE_B_SHA384	0x400000 /* Suite B-192 SHA384 */
 
+/* WPA3 1x with SHA256 key derivation.
+ * Shares the same value as WPA2_AUTH_1X_SHA256 since the value of
+ * akm-suite is the same for both
+ */
+#define WPA3_AUTH_1X_SHA256 WPA2_AUTH_1X_SHA256
 
 #define WFA_OUI			"\x50\x6F\x9A"	/* WFA OUI */
 #define DPP_VER			0x1A	/* WFA DPP v1.0 */
@@ -259,5 +265,19 @@ static inline bool ac_bitmap_tst(u8 bitmap, int prec)
 
 #define HT_CAP_RX_STBC_NO		0x0
 #define HT_CAP_RX_STBC_ONE_STREAM	0x1
+
+#define WPA_PROTO_WPA BIT(0)
+#define WPA_PROTO_RSN BIT(1)
+
+static inline int wpa_akm_ft(int akm)
+{
+	return !!((akm == WLAN_AKM_SUITE_FT_PSK) ||
+		(akm == WLAN_AKM_SUITE_FT_8021X) ||
+		(akm == WLAN_AKM_SUITE_FT_8021X_SHA384) ||
+		(akm == WLAN_AKM_SUITE_FT_OVER_SAE) ||
+		(akm == WLAN_AKM_SUITE_FT_FILS_SHA256) ||
+		(akm == WLAN_AKM_SUITE_FT_FILS_SHA384) ||
+		(akm == WLAN_AKM_SUITE_FT_PSK_SHA384));
+}
 
 #endif				/* _BRCMU_WIFI_H_ */

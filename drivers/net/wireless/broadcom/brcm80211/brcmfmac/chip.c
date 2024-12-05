@@ -239,7 +239,7 @@ struct sbsocramregs {
 #define CYW55572_RAM_BASE	(0x370000 + \
 				 CYW55572_TCAM_SIZE + CYW55572_TRXHDR_SIZE)
 
-/* 55500, Dedicated sapce for TCAM_PATCH and TRX HDR area at RAMSTART */
+/* 55500-A0, Dedicated sapce for TCAM_PATCH and TRX HDR area at RAMSTART */
 #define CYW55500_RAM_START	(0x3a0000)
 #define CYW55500_TCAM_SIZE	(0x800)
 #define CYW55500_TRXHDR_SIZE	(0x2b4)
@@ -247,12 +247,18 @@ struct sbsocramregs {
 #define CYW55500_RAM_BASE	(CYW55500_RAM_START + CYW55500_TCAM_SIZE + \
 				 CYW55500_TRXHDR_SIZE)
 
+/* 55500-A1, Dedicated sapce for TCAM_PATCH and TRX HDR area at RAMSTART */
+#define CYW55500_A1_TCAM_SIZE	(0x1000)
+#define CYW55500_A1_TRXHDR_SIZE	(0x20)
+
+#define CYW55500_A1_RAM_BASE	(CYW55500_RAM_START + CYW55500_A1_TCAM_SIZE + \
+				 CYW55500_A1_TRXHDR_SIZE)
+
 #define BRCMF_BLHS_POLL_INTERVAL			10	/* msec */
 #define BRCMF_BLHS_D2H_READY_TIMEOUT			100	/* msec */
 #define BRCMF_BLHS_D2H_TRXHDR_PARSE_DONE_TIMEOUT	50	/* msec */
 
-//TODO: original value is 450, check if need assign to specific chip or not.
-#define BRCMF_BLHS_D2H_VALDN_DONE_TIMEOUT		250	/* msec */
+#define BRCMF_BLHS_D2H_VALDN_DONE_TIMEOUT		450	/* msec */
 #define BRCMF_BLHS_D2H_MV_NVRAM_DONE_TIMEOUT		(100)	/* msec */
 #define BRCMF_BLHS_D2H_BP_CLK_DISABLE_REQ_TIMEOUT	(5 * 1000)	/* msec */
 
@@ -785,6 +791,7 @@ static u32 brcmf_chip_tcm_rambase(struct brcmf_chip_priv *ci)
 {
 	switch (ci->pub.chip) {
 	case BRCM_CC_4345_CHIP_ID:
+	case BRCM_CC_43454_CHIP_ID:
 		return 0x198000;
 	case BRCM_CC_4335_CHIP_ID:
 	case BRCM_CC_4339_CHIP_ID:
@@ -812,10 +819,12 @@ static u32 brcmf_chip_tcm_rambase(struct brcmf_chip_priv *ci)
 		return 0x160000;
 	case CY_CC_43752_CHIP_ID:
 		return 0x170000;
+	case BRCM_CC_4378_CHIP_ID:
+		return 0x352000;
 	case CY_CC_89459_CHIP_ID:
 		return ((ci->pub.chiprev < 9) ? 0x180000 : 0x160000);
 	case CY_CC_55500_CHIP_ID:
-		return CYW55500_RAM_BASE;
+		return ((ci->pub.chiprev == 0) ? CYW55500_RAM_BASE : CYW55500_A1_RAM_BASE);
 	case CY_CC_55572_CHIP_ID:
 		return CYW55572_RAM_BASE;
 	default:
@@ -837,9 +846,14 @@ int brcmf_chip_get_raminfo(struct brcmf_chip *pub)
 		mem_core = container_of(mem, struct brcmf_core_priv, pub);
 		ci->pub.ramsize = brcmf_chip_tcm_ramsize(mem_core);
 
-		if (ci->pub.chip == CY_CC_55500_CHIP_ID)
-			ci->pub.ramsize -= (CYW55500_TCAM_SIZE +
-					    CYW55500_TRXHDR_SIZE);
+		if (ci->pub.chip == CY_CC_55500_CHIP_ID) {
+			if (ci->pub.chiprev == 0)
+				ci->pub.ramsize -= (CYW55500_TCAM_SIZE +
+						CYW55500_TRXHDR_SIZE);
+			else
+				ci->pub.ramsize -= (CYW55500_A1_TCAM_SIZE +
+						CYW55500_A1_TRXHDR_SIZE);
+		}
 
 		if (ci->pub.chip == CY_CC_55572_CHIP_ID)
 			ci->pub.ramsize -= (CYW55572_TCAM_SIZE +
@@ -1770,6 +1784,7 @@ bool brcmf_chip_sr_capable(struct brcmf_chip *pub)
 	case BRCM_CC_4354_CHIP_ID:
 	case BRCM_CC_4356_CHIP_ID:
 	case BRCM_CC_4345_CHIP_ID:
+	case BRCM_CC_43454_CHIP_ID:
 		/* explicitly check SR engine enable bit */
 		pmu_cc3_mask = BIT(2);
 		fallthrough;

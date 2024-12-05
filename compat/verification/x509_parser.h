@@ -9,10 +9,6 @@
 #include <crypto/public_key.h>
 #include <keys/asymmetric-type.h>
 
-#define x509_decode_time LINUX_BACKPORT(x509_decode_time)
-#define x509_cert_parse LINUX_BACKPORT(x509_cert_parse)
-#define x509_free_certificate LINUX_BACKPORT(x509_free_certificate)
-
 struct x509_certificate {
 	struct x509_certificate *next;
 	struct x509_certificate *signer;	/* Certificate that signed this one */
@@ -26,7 +22,7 @@ struct x509_certificate {
 	time64_t	valid_to;
 	const void	*tbs;			/* Signed data */
 	unsigned	tbs_size;		/* Size of signed data */
-	unsigned	raw_sig_size;		/* Size of sigature */
+	unsigned	raw_sig_size;		/* Size of signature */
 	const void	*raw_sig;		/* Signature data */
 	const void	*raw_serial;		/* Raw serial number in ASN.1 */
 	unsigned	raw_serial_size;
@@ -40,10 +36,18 @@ struct x509_certificate {
 	bool		seen;			/* Infinite recursion prevention */
 	bool		verified;
 	bool		self_signed;		/* T if self-signed (check unsupported_sig too) */
-	bool		unsupported_key;	/* T if key uses unsupported crypto */
 	bool		unsupported_sig;	/* T if signature uses unsupported crypto */
 	bool		blacklisted;
 };
+
+/*
+ * selftest.c
+ */
+#ifdef CONFIG_FIPS_SIGNATURE_SELFTEST
+extern int __init fips_signature_selftest(void);
+#else
+static inline int fips_signature_selftest(void) { return 0; }
+#endif
 
 /*
  * x509_cert_parser.c

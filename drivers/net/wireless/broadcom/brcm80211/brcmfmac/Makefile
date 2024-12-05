@@ -52,5 +52,5 @@ brcmfmac-$(CONFIG_DMI) += \
 		dmi.o
 brcmfmac-${CPTCFG_BRCMFMAC_BT_SHARED_SDIO} += \
 		bt_shared_sdio.o
-brcmfmac-${CPTCFG_IFX_BT_SHARED_SDIO} += \
+brcmfmac-${CPTCFG_INFFMAC_BT_SHARED_SDIO} += \
 		bt_shared_sdio_ifx.o

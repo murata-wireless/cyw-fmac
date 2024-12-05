@@ -369,8 +369,11 @@ brcmf_msgbuf_alloc_pktid(struct device *dev,
 		count++;
 	} while (count < pktids->array_size);
 
-	if (count == pktids->array_size)
+	if (count == pktids->array_size) {
+		dma_unmap_single(dev, *physaddr, skb->len - data_offset,
+				 pktids->direction);
 		return -ENOMEM;
+	}
 
 	array[*idx].data_offset = data_offset;
 	array[*idx].physaddr = *physaddr;
@@ -587,7 +590,8 @@ static int brcmf_msgbuf_hdrpull(struct brcmf_pub *drvr, bool do_fws,
 	return -ENODEV;
 }
 
-static void brcmf_msgbuf_rxreorder(struct brcmf_if *ifp, struct sk_buff *skb)
+static void brcmf_msgbuf_rxreorder(struct brcmf_if *ifp, struct sk_buff *skb,
+				   bool inirq)
 {
 }
 
@@ -824,7 +828,7 @@ static void brcmf_msgbuf_rx(struct brcmf_msgbuf *msgbuf)
 	while ((skb = skb_dequeue(&msgbuf->rx_data_q))) {
 		ifp = netdev_priv(skb->dev);
 		if (ifp)
-			brcmf_netif_rx(ifp, skb);
+			brcmf_netif_rx(ifp, skb, false);
 	}
 }
 

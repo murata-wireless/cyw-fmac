@@ -12,6 +12,9 @@
 
 #define BRCMF_FIL_ACTION_FRAME_SIZE	1800
 
+#define BRCMF_AF_PARAM_V2_FW_MAJOR 13
+#define BRCMF_AF_PARAM_V2_FW_MINOR 2
+
 /* ARP Offload feature flags for arp_ol iovar */
 #define BRCMF_ARP_OL_AGENT		0x00000001
 #define BRCMF_ARP_OL_SNOOP		0x00000002
@@ -157,6 +160,7 @@ enum {
 };
 
 #define MAX_PKTFILTER_PATTERN_SIZE		16
+#define MAX_PKTFILTER_PATTERN_FILL_SIZE	(MAX_PKTFILTER_PATTERN_SIZE * 2)
 
 #define BRCMF_COUNTRY_BUF_SZ		4
 #define BRCMF_ANT_MAX			4
@@ -298,6 +302,17 @@ struct brcmf_fil_af_params_le {
 	struct brcmf_fil_action_frame_le	action_frame;
 };
 
+struct brcmf_fil_af_params_v2_le {
+	__le16					version;
+	__le16					length;
+	__le32					channel;
+	__le32					dwell_time;
+	u8					bssid[ETH_ALEN];
+	u8					band;
+	u8					pad[1];
+	struct brcmf_fil_action_frame_le	action_frame;
+};
+
 struct brcmf_fil_bss_enable_le {
 	__le32 bsscfgidx;
 	__le32 enable;
@@ -345,7 +360,7 @@ struct brcmf_pkt_filter_pattern_le {
 	 * Variable length mask and pattern data. mask starts at offset 0.
 	 * Pattern immediately follows mask.
 	 */
-	u8 mask_and_pattern[1];
+	u8 mask_and_pattern[MAX_PKTFILTER_PATTERN_FILL_SIZE];
 };
 
 /* IOVAR "pkt_filter_add" parameter. Used to install packet filters. */
@@ -449,7 +464,12 @@ struct brcmf_scan_params_le {
 				 * fixed parameter portion is assumed, otherwise
 				 * ssid in the fixed portion is ignored
 				 */
-	__le16 channel_list[1];	/* list of chanspecs */
+	union {
+		__le16 padding;	/* Reserve space for at least 1 entry for abort
+				 * which uses an on stack brcmf_scan_params_le
+				 */
+		DECLARE_FLEX_ARRAY(__le16, channel_list);	/* chanspecs */
+	};
 };
 
 struct brcmf_scan_results {
@@ -583,7 +603,7 @@ struct brcmf_wsec_key_le {
 struct brcmf_wsec_pmk_le {
 	__le16  key_len;
 	__le16  flags;
-	u8 key[2 * BRCMF_WSEC_MAX_PMK_LEN + 1];
+	u8 key[BRCMF_WSEC_MAX_PMK_LEN];
 };
 
 /**
@@ -846,6 +866,31 @@ struct brcmf_rev_info_le {
 	__le32 anarev;
 	__le32 chippkg;
 	__le32 nvramrev;
+};
+
+/**
+ * struct brcmf_wlc_version_le - firmware revision info.
+ *
+ * @version: structure version.
+ * @length: structure length.
+ * @epi_ver_major: EPI major version
+ * @epi_ver_minor: EPI minor version
+ * @epi_ver_rc: EPI rc version
+ * @epi_ver_incr: EPI increment version
+ * @wlc_ver_major: WLC major version
+ * @wlc_ver_minor: WLC minor version
+ */
+struct brcmf_wlc_version_le {
+	__le16 version;
+	__le16 length;
+
+	__le16 epi_ver_major;
+	__le16 epi_ver_minor;
+	__le16 epi_ver_rc;
+	__le16 epi_ver_incr;
+
+	__le16 wlc_ver_major;
+	__le16 wlc_ver_minor;
 };
 
 /**
@@ -1158,6 +1203,25 @@ struct brcmf_gscan_config {
 	__le16  lost_ap_window;
 	struct brcmf_gscan_bucket_config bucket[1];
 };
+
+/**
+ * struct brcmf_mkeep_alive_pkt_le - configuration data for keep-alive frame.
+ *
+ * @version: version for mkeep_alive
+ * @length: length of fixed parameters in the structure.
+ * @period_msec: keep-alive period in milliseconds.
+ * @len_bytes: size of the data.
+ * @keep_alive_id: ID  (0 - 3).
+ * @data: keep-alive frame data.
+ */
+struct brcmf_mkeep_alive_pkt_le {
+	__le16  version;
+	__le16  length;
+	__le32  period_msec;
+	__le16  len_bytes;
+	u8   keep_alive_id;
+	u8   data[];
+} __packed;
 
 /* BRCM_E_RSSI event data */
 struct wl_event_data_rssi {

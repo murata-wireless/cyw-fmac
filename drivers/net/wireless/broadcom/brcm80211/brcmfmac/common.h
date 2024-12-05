@@ -56,6 +56,7 @@ extern struct brcmf_mp_global_t brcmf_mp_global;
  * @eap_restrict: Not allow data tx/rx until 802.1X auth succeeds
  * @default_pm: default power management (PM) mode.
  * @ignore_probe_fail: Ignore probe failure.
+ * @trivial_ccode_map: Assume firmware uses ISO3166 country codes with rev 0
  * @fw_ap_select: Allow FW to select AP.
  * @disable_6ghz: Disable 6GHz operation
  * @sdio_in_isr: Handle SDIO DPC in ISR.
@@ -67,15 +68,17 @@ extern struct brcmf_mp_global_t brcmf_mp_global;
  * @idleclk_disable: SDIO bus clock output disable when bus is idle.
  * @idle_time_zero: Set idle interval to zero.
  */
+#define BRCMF_MAX_FEATURE_BYTES DIV_ROUND_UP(BRCMF_FEAT_LAST, 8)
 struct brcmf_mp_device {
 	bool		p2p_enable;
-	unsigned int	feature_disable;
+	unsigned char	feature_disable[BRCMF_MAX_FEATURE_BYTES];
 	int		fcmode;
 	unsigned int	roamoff;
 	bool		iapp;
 	bool		eap_restrict;
 	int		default_pm;
 	bool		ignore_probe_fail;
+	bool		trivial_ccode_map;
 	bool		fw_ap_select;
 	bool		disable_6ghz;
 	bool		sdio_in_isr;
@@ -83,8 +86,11 @@ struct brcmf_mp_device {
 	unsigned int	offload_prof;
 	unsigned int	offload_feat;
 	bool		bt_over_sdio;
+	bool		short_psq;
 	struct brcmfmac_pd_cc *country_codes;
 	const char	*board_type;
+	unsigned char	mac[ETH_ALEN];
+	const char	*antenna_sku;
 	union {
 		struct brcmfmac_sdio_pd sdio;
 	} bus;
@@ -122,6 +128,7 @@ void brcmf_release_module_param(struct brcmf_mp_device *module_param);
 
 /* Sets dongle media info (drv_version, mac address). */
 int brcmf_c_preinit_dcmds(struct brcmf_if *ifp);
+int brcmf_c_set_cur_etheraddr(struct brcmf_if *ifp, const u8 *addr);
 
 #ifdef CONFIG_DMI
 void brcmf_dmi_probe(struct brcmf_mp_device *settings, u32 chip, u32 chiprev);

@@ -264,6 +264,8 @@ nla_validate_nested_deprecated(const struct nlattr *start, int maxtype,
 	return __nla_validate_nested(start, maxtype, policy,
 				     NL_VALIDATE_LIBERAL, extack);
 }
+
+#define NLA_POLICY_MIN_LEN(_len)	{ .type = NLA_MIN_LEN, .len = _len }
 #endif /* < 5.2 */
 
 #if LINUX_VERSION_IS_LESS(5,6,0)
@@ -346,210 +348,34 @@ enum nla_policy_validation {
 }
 #endif /* < 4.20 */
 
-#if LINUX_VERSION_IS_LESS(4,12,0)
-#include <backport/magic.h>
-
-static inline int _nla_validate5(const struct nlattr *head,
-				 int len, int maxtype,
-				 const struct nla_policy *policy,
-				 struct netlink_ext_ack *extack)
-{
-	return nla_validate(head, len, maxtype, policy, extack);
-}
-static inline int _nla_validate4(const struct nlattr *head,
-				 int len, int maxtype,
-				 const struct nla_policy *policy)
-{
-	return nla_validate(head, len, maxtype, policy, NULL);
-}
-#undef nla_validate
-#define nla_validate(...) \
-	macro_dispatcher(_nla_validate, __VA_ARGS__)(__VA_ARGS__)
-
-static inline int _nla_parse6(struct nlattr **tb, int maxtype,
-			      const struct nlattr *head,
-			      int len, const struct nla_policy *policy,
-			      struct netlink_ext_ack *extack)
-{
-	return nla_parse(tb, maxtype, head, len, policy, extack);
-}
-static inline int _nla_parse5(struct nlattr **tb, int maxtype,
-			      const struct nlattr *head,
-			      int len, const struct nla_policy *policy)
-{
-	return nla_parse(tb, maxtype, head, len, policy, NULL);
-}
-#undef nla_parse
-#define nla_parse(...) \
-	macro_dispatcher(_nla_parse, __VA_ARGS__)(__VA_ARGS__)
-
-static inline int _nlmsg_parse6(const struct nlmsghdr *nlh, int hdrlen,
-			        struct nlattr *tb[], int maxtype,
-			        const struct nla_policy *policy,
-			        struct netlink_ext_ack *extack)
-{
-	return nlmsg_parse(nlh, hdrlen, tb, maxtype, policy, extack);
-}
-static inline int _nlmsg_parse5(const struct nlmsghdr *nlh, int hdrlen,
-			        struct nlattr *tb[], int maxtype,
-			        const struct nla_policy *policy)
-{
-	return nlmsg_parse(nlh, hdrlen, tb, maxtype, policy, NULL);
-}
-#undef nlmsg_parse
-#define nlmsg_parse(...) \
-	macro_dispatcher(_nlmsg_parse, __VA_ARGS__)(__VA_ARGS__)
-
-static inline int _nlmsg_validate5(const struct nlmsghdr *nlh,
-				   int hdrlen, int maxtype,
-				   const struct nla_policy *policy,
-				   struct netlink_ext_ack *extack)
-{
-	return nlmsg_validate(nlh, hdrlen, maxtype, policy, extack);
-}
-static inline int _nlmsg_validate4(const struct nlmsghdr *nlh,
-				   int hdrlen, int maxtype,
-				   const struct nla_policy *policy)
-{
-	return nlmsg_validate(nlh, hdrlen, maxtype, policy, NULL);
-}
-#undef nlmsg_validate
-#define nlmsg_validate(...) \
-	macro_dispatcher(_nlmsg_validate, __VA_ARGS__)(__VA_ARGS__)
-
-static inline int _nla_parse_nested5(struct nlattr *tb[], int maxtype,
-				     const struct nlattr *nla,
-				     const struct nla_policy *policy,
-				     struct netlink_ext_ack *extack)
-{
-	return nla_parse_nested(tb, maxtype, nla, policy, extack);
-}
-static inline int _nla_parse_nested4(struct nlattr *tb[], int maxtype,
-				     const struct nlattr *nla,
-				     const struct nla_policy *policy)
-{
-	return nla_parse_nested(tb, maxtype, nla, policy, NULL);
-}
-#undef nla_parse_nested
-#define nla_parse_nested(...) \
-	macro_dispatcher(_nla_parse_nested, __VA_ARGS__)(__VA_ARGS__)
-#endif /* LINUX_VERSION_IS_LESS(4,12,0) */
-
-#if LINUX_VERSION_IS_LESS(4,7,0)
-/**
- * nla_need_padding_for_64bit - test 64-bit alignment of the next attribute
- * @skb: socket buffer the message is stored in
- *
- * Return true if padding is needed to align the next attribute (nla_data()) to
- * a 64-bit aligned area.
- */
-#define nla_need_padding_for_64bit LINUX_BACKPORT(nla_need_padding_for_64bit)
-static inline bool nla_need_padding_for_64bit(struct sk_buff *skb)
-{
-#ifndef CONFIG_HAVE_EFFICIENT_UNALIGNED_ACCESS
-       /* The nlattr header is 4 bytes in size, that's why we test
-        * if the skb->data _is_ aligned.  A NOP attribute, plus
-        * nlattr header for next attribute, will make nla_data()
-        * 8-byte aligned.
-        */
-       if (IS_ALIGNED((unsigned long)skb_tail_pointer(skb), 8))
-               return true;
-#endif
-       return false;
-}
-/**
- * nla_align_64bit - 64-bit align the nla_data() of next attribute
- * @skb: socket buffer the message is stored in
- * @padattr: attribute type for the padding
- *
- * Conditionally emit a padding netlink attribute in order to make
- * the next attribute we emit have a 64-bit aligned nla_data() area.
- * This will only be done in architectures which do not have
- * HAVE_EFFICIENT_UNALIGNED_ACCESS defined.
- *
- * Returns zero on success or a negative error code.
- */
-#define nla_align_64bit LINUX_BACKPORT(nla_align_64bit)
-static inline int nla_align_64bit(struct sk_buff *skb, int padattr)
-{
-       if (nla_need_padding_for_64bit(skb) &&
-            !nla_reserve(skb, padattr, 0))
-                return -EMSGSIZE;
-       return 0;
+#if LINUX_VERSION_IS_LESS(5,10,0)
+// pre-declare all the minimum lengths in use
+#define MIN_LEN_VALIDATION(n)						\
+static inline								\
+int nla_validate_min_len_##n(const struct nlattr *attr,			\
+			     struct netlink_ext_ack *extack)		\
+{									\
+	if (nla_len(attr) < n)						\
+		return -EINVAL;						\
+	return 0;							\
 }
 
-/**
- * nla_total_size_64bit - total length of attribute including padding
- * @payload: length of payload
- */
-#define nla_total_size_64bit LINUX_BACKPORT(nla_total_size_64bit)
-static inline int nla_total_size_64bit(int payload)
-{
-       return NLA_ALIGN(nla_attr_size(payload))
-#ifndef HAVE_EFFICIENT_UNALIGNED_ACCESS
-               + NLA_ALIGN(nla_attr_size(0))
-#endif
-               ;
-}
-#define __nla_reserve_64bit LINUX_BACKPORT(__nla_reserve_64bit)
-struct nlattr *__nla_reserve_64bit(struct sk_buff *skb, int attrtype,
-				   int attrlen, int padattr);
-#define nla_reserve_64bit LINUX_BACKPORT(nla_reserve_64bit)
-struct nlattr *nla_reserve_64bit(struct sk_buff *skb, int attrtype,
-				 int attrlen, int padattr);
-#define __nla_put_64bit LINUX_BACKPORT(__nla_put_64bit)
-void __nla_put_64bit(struct sk_buff *skb, int attrtype, int attrlen,
-		     const void *data, int padattr);
-#define nla_put_64bit LINUX_BACKPORT(nla_put_64bit)
-int nla_put_64bit(struct sk_buff *skb, int attrtype, int attrlen,
-		  const void *data, int padattr);
-/**
- * nla_put_u64_64bit - Add a u64 netlink attribute to a skb and align it
- * @skb: socket buffer to add attribute to
- * @attrtype: attribute type
- * @value: numeric value
- * @padattr: attribute type for the padding
- */
-#define nla_put_u64_64bit LINUX_BACKPORT(nla_put_u64_64bit)
-static inline int nla_put_u64_64bit(struct sk_buff *skb, int attrtype,
-                                    u64 value, int padattr)
-{
-        return nla_put_64bit(skb, attrtype, sizeof(u64), &value, padattr);
-}
+MIN_LEN_VALIDATION(2)
+MIN_LEN_VALIDATION(13)
+MIN_LEN_VALIDATION(16)
+MIN_LEN_VALIDATION(42)
 
-
-/**
- * nla_put_s64 - Add a s64 netlink attribute to a socket buffer and align it
- * @skb: socket buffer to add attribute to
- * @attrtype: attribute type
- * @value: numeric value
- * @padattr: attribute type for the padding
- */
-#define nla_put_s64 LINUX_BACKPORT(nla_put_s64)
-static inline int nla_put_s64(struct sk_buff *skb, int attrtype, s64 value,
-			      int padattr)
-{
-	return nla_put_64bit(skb, attrtype, sizeof(s64), &value, padattr);
+// double-expansion to expand _min to the actual value
+#define NLA_POLICY_BINARY_RANGE(_min, _max) _NLA_POLICY_BINARY_RANGE(_min, _max)
+#define _NLA_POLICY_BINARY_RANGE(_min, _max)		\
+{							\
+	.type = NLA_BINARY,				\
+	.len = _max,					\
+	.validation_type = NLA_VALIDATE_FUNCTION,	\
+	.validate = nla_validate_min_len_ ## _min,	\
 }
-#endif /* < 4.7 */
-
-#if LINUX_VERSION_IS_LESS(4,10,0)
-/**
- * nla_memdup - duplicate attribute memory (kmemdup)
- * @src: netlink attribute to duplicate from
- * @gfp: GFP mask
- */
-#define nla_memdump LINUX_BACKPORT(nla_memdup)
-static inline void *nla_memdup(const struct nlattr *src, gfp_t gfp)
-{
-	return kmemdup(nla_data(src), nla_len(src), gfp);
-}
-#endif /* < 4.9 */
-
-#ifndef NLA_POLICY_MIN_LEN
-#define NLA_POLICY_MIN_LEN(_len) {		\
-	.type = NLA_BINARY			\
-}
-#endif
+#else
+#define NLA_POLICY_BINARY_RANGE(_min, _max) NLA_POLICY_RANGE(NLA_BINARY, _min, _max)
+#endif /* < 5.10 */
 
 #endif /* __BACKPORT_NET_NETLINK_H */

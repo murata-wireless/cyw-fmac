@@ -91,8 +91,8 @@
 #define P2PSD_ACTION_CATEGORY		0x04	/* Public action frame */
 #define P2PSD_ACTION_ID_GAS_IREQ	0x0a	/* GAS Initial Request AF */
 #define P2PSD_ACTION_ID_GAS_IRESP	0x0b	/* GAS Initial Response AF */
-#define P2PSD_ACTION_ID_GAS_CREQ	0x0c	/* GAS Comback Request AF */
-#define P2PSD_ACTION_ID_GAS_CRESP	0x0d	/* GAS Comback Response AF */
+#define P2PSD_ACTION_ID_GAS_CREQ	0x0c	/* GAS Comeback Request AF */
+#define P2PSD_ACTION_ID_GAS_CRESP	0x0d	/* GAS Comeback Response AF */
 
 #define BRCMF_P2P_DISABLE_TIMEOUT	msecs_to_jiffies(500)
 
@@ -159,7 +159,7 @@ struct brcmf_p2p_pub_act_frame {
 	u8	oui_type;
 	u8	subtype;
 	u8	dialog_token;
-	u8	elts[1];
+	u8	elts[];
 };
 
 /**
@@ -178,7 +178,7 @@ struct brcmf_p2p_action_frame {
 	u8	type;
 	u8	subtype;
 	u8	dialog_token;
-	u8	elts[1];
+	u8	elts[];
 };
 
 /**
@@ -193,7 +193,7 @@ struct brcmf_p2psd_gas_pub_act_frame {
 	u8	category;
 	u8	action;
 	u8	dialog_token;
-	u8	query_data[1];
+	u8	query_data[];
 };
 
 /**
@@ -226,7 +226,7 @@ static bool brcmf_p2p_is_pub_action(void *frame, u32 frame_len)
 		return false;
 
 	pact_frm = (struct brcmf_p2p_pub_act_frame *)frame;
-	if (frame_len < sizeof(struct brcmf_p2p_pub_act_frame) - 1)
+	if (frame_len < sizeof(*pact_frm))
 		return false;
 
 	if (pact_frm->category == P2P_PUB_AF_CATEGORY &&
@@ -282,7 +282,7 @@ static bool brcmf_p2p_is_p2p_action(void *frame, u32 frame_len)
 		return false;
 
 	act_frm = (struct brcmf_p2p_action_frame *)frame;
-	if (frame_len < sizeof(struct brcmf_p2p_action_frame) - 1)
+	if (frame_len < sizeof(*act_frm))
 		return false;
 
 	if (act_frm->category == P2P_AF_CATEGORY &&
@@ -309,7 +309,7 @@ static bool brcmf_p2p_is_gas_action(void *frame, u32 frame_len)
 		return false;
 
 	sd_act_frm = (struct brcmf_p2psd_gas_pub_act_frame *)frame;
-	if (frame_len < sizeof(struct brcmf_p2psd_gas_pub_act_frame) - 1)
+	if (frame_len < sizeof(*sd_act_frm))
 		return false;
 
 	if (sd_act_frm->category != P2PSD_ACTION_CATEGORY)
@@ -425,11 +425,11 @@ static void brcmf_p2p_print_actframe(bool tx, void *frame, u32 frame_len)
 				  (tx) ? "TX" : "RX");
 			break;
 		case P2PSD_ACTION_ID_GAS_CREQ:
-			brcmf_dbg(TRACE, "%s P2P GAS Comback Request\n",
+			brcmf_dbg(TRACE, "%s P2P GAS Comeback Request\n",
 				  (tx) ? "TX" : "RX");
 			break;
 		case P2PSD_ACTION_ID_GAS_CRESP:
-			brcmf_dbg(TRACE, "%s P2P GAS Comback Response\n",
+			brcmf_dbg(TRACE, "%s P2P GAS Comeback Response\n",
 				  (tx) ? "TX" : "RX");
 			break;
 		default:
@@ -1174,7 +1174,7 @@ static void brcmf_p2p_afx_handler(struct work_struct *work)
 	if (afx_hdl->is_listen && afx_hdl->my_listen_chan)
 		/* 100ms ~ 300ms */
 		err = brcmf_p2p_discover_listen(p2p, afx_hdl->my_listen_chan,
-						100 * (1 + prandom_u32() % 3));
+						100 * (1 + prandom_u32_max(3)));
 	else
 		err = brcmf_p2p_act_frm_search(p2p, afx_hdl->peer_listen_chan);
 
@@ -1572,8 +1572,9 @@ int brcmf_p2p_notify_action_tx_complete(struct brcmf_if *ifp,
  * brcmf_p2p_tx_action_frame() - send action frame over fil.
  *
  * @p2p: p2p info struct for vif.
+ * @vif: vif to send.
  * @af_params: action frame data/info.
- * @vif: vif to send
+ * @band: nl80211 band info.
  *
  * Send an action frame immediately without doing channel synchronization.
  *
@@ -1582,17 +1583,13 @@ int brcmf_p2p_notify_action_tx_complete(struct brcmf_if *ifp,
  * frame is transmitted.
  */
 static s32 brcmf_p2p_tx_action_frame(struct brcmf_p2p_info *p2p,
+				     struct brcmf_cfg80211_vif *vif,
 				     struct brcmf_fil_af_params_le *af_params,
-				     struct brcmf_cfg80211_vif *vif
-				     )
+				     u8 band)
 {
 	struct brcmf_pub *drvr = p2p->cfg->pub;
 	s32 err = 0;
-	struct brcmf_fil_action_frame_le *action_frame;
-	u16 action_frame_len;
-
-	action_frame = &af_params->action_frame;
-	action_frame_len = le16_to_cpu(action_frame->len);
+	struct brcmf_fil_af_params_v2_le af_params_v2;
 
 	brcmf_dbg(TRACE, "Enter\n");
 
@@ -1600,8 +1597,23 @@ static s32 brcmf_p2p_tx_action_frame(struct brcmf_p2p_info *p2p,
 	clear_bit(BRCMF_P2P_STATUS_ACTION_TX_COMPLETED, &p2p->status);
 	clear_bit(BRCMF_P2P_STATUS_ACTION_TX_NOACK, &p2p->status);
 
-	err = brcmf_fil_bsscfg_data_set(vif->ifp, "actframe", af_params,
-					sizeof(*af_params));
+	if (drvr->wlc_ver.wlc_ver_major == BRCMF_AF_PARAM_V2_FW_MAJOR &&
+	    drvr->wlc_ver.wlc_ver_minor >= BRCMF_AF_PARAM_V2_FW_MINOR) {
+		/* set actframe iovar with af_params_v2 */
+		af_params_v2.band = nl80211_band_to_fwil(band);
+		af_params_v2.channel = af_params->channel;
+		af_params_v2.dwell_time = af_params->dwell_time;
+		memcpy(af_params_v2.bssid, af_params->bssid, ETH_ALEN);
+		af_params_v2.action_frame = af_params->action_frame;
+
+		err = brcmf_fil_bsscfg_data_set(vif->ifp, "actframe", &af_params_v2,
+						sizeof(af_params_v2));
+	} else {
+		/* set actframe iovar with af_params */
+		err = brcmf_fil_bsscfg_data_set(vif->ifp, "actframe", af_params,
+						sizeof(*af_params));
+	}
+
 	if (err) {
 		bphy_err(drvr, " sending action frame has failed\n");
 		goto exit;
@@ -1787,21 +1799,6 @@ bool brcmf_p2p_send_action_frame(struct brcmf_cfg80211_info *cfg,
 
 	brcmf_p2p_print_actframe(true, action_frame->data, action_frame_len);
 
-	/*
-	 * If p2p_find is not issued before creating AGO group,
-	 * my_listen_chan remains uninitialized causing KERNEL WARNING.
-	 */
-	if (afx_hdl->my_listen_chan == P2P_INVALID_CHANSPEC) {
-		struct brcmu_chan ch_inf;
-
-		ch_inf.band = BRCMU_CHAN_BAND_2G;
-		ch_inf.bw = BRCMU_CHAN_BW_20;
-		ch_inf.sb = BRCMU_CHAN_SB_NONE;
-		ch_inf.chnum = BRCMF_P2P_TEMP_CHAN;
-		p2p->cfg->d11inf.encchspec(&ch_inf);
-		p2p->afx_hdl.my_listen_chan = ch_inf.chspec;
-	}
-
 	/* Add the default dwell time. Dwell time to stay off-channel */
 	/* to wait for a response action frame after transmitting an  */
 	/* GO Negotiation action frame                                */
@@ -1923,7 +1920,7 @@ bool brcmf_p2p_send_action_frame(struct brcmf_cfg80211_info *cfg,
 		if (af_params->channel)
 			msleep(P2P_AF_RETRY_DELAY_TIME);
 
-		ack = !brcmf_p2p_tx_action_frame(p2p, af_params, vif);
+		ack = !brcmf_p2p_tx_action_frame(p2p, vif, af_params, peer_listen_chan->band);
 		tx_retry++;
 		dwell_overflow = brcmf_p2p_check_dwell_overflow(requested_dwell,
 								dwell_jiffies);
@@ -2192,7 +2189,7 @@ static int brcmf_p2p_disable_p2p_if(struct brcmf_cfg80211_vif *vif)
 	struct brcmf_cfg80211_info *cfg = wdev_to_cfg(&vif->wdev);
 	struct net_device *pri_ndev = cfg_to_ndev(cfg);
 	struct brcmf_if *ifp = netdev_priv(pri_ndev);
-	u8 *addr = vif->wdev.netdev->dev_addr;
+	const u8 *addr = vif->wdev.netdev->dev_addr;
 
 	return brcmf_fil_iovar_data_set(ifp, "p2p_ifdis", addr, ETH_ALEN);
 }
@@ -2202,7 +2199,7 @@ static int brcmf_p2p_release_p2p_if(struct brcmf_cfg80211_vif *vif)
 	struct brcmf_cfg80211_info *cfg = wdev_to_cfg(&vif->wdev);
 	struct net_device *pri_ndev = cfg_to_ndev(cfg);
 	struct brcmf_if *ifp = netdev_priv(pri_ndev);
-	u8 *addr = vif->wdev.netdev->dev_addr;
+	const u8 *addr = vif->wdev.netdev->dev_addr;
 
 	return brcmf_fil_iovar_data_set(ifp, "p2p_ifdel", addr, ETH_ALEN);
 }

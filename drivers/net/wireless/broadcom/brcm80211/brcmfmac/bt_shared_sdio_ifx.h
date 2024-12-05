@@ -32,22 +32,22 @@
 #ifndef	BT_SHARED_SDIO_IFX_H
 #define	BT_SHARED_SDIO_IFX_H
 
-#ifdef CPTCFG_IFX_BT_SHARED_SDIO
+#ifdef CPTCFG_INFFMAC_BT_SHARED_SDIO
 
-void ifx_btsdio_init(struct brcmf_bus *bus_if);
-void ifx_btsdio_deinit(struct brcmf_bus *bus_if);
-bool ifx_btsdio_is_active(struct brcmf_bus *bus_if);
-bool ifx_btsdio_set_bt_reset(struct brcmf_bus *bus_if);
-bool ifx_btsdio_inited(struct brcmf_bus *bus_if);
-void ifx_btsdio_debugfs_create(struct brcmf_pub *drvr);
+void inf_btsdio_init(struct brcmf_bus *bus_if);
+void inf_btsdio_deinit(struct brcmf_bus *bus_if);
+bool inf_btsdio_is_active(struct brcmf_bus *bus_if);
+bool inf_btsdio_set_bt_reset(struct brcmf_bus *bus_if);
+bool inf_btsdio_inited(struct brcmf_bus *bus_if);
+void inf_btsdio_debugfs_create(struct brcmf_pub *drvr);
 
 #else
-#define ifx_btsdio_init(bus_if)
-#define ifx_btsdio_deinit(bus_if)
-#define ifx_btsdio_is_active(bus_if) false
-#define ifx_btsdio_set_bt_reset(bus_if) false
-#define ifx_btsdio_inited(bus_if) false
-#define ifx_btsdio_debugfs_create(drvr)
-#endif /* CPTCFG_IFX_BT_SHARED_SDIO */
+#define inf_btsdio_init(bus_if)
+#define inf_btsdio_deinit(bus_if)
+#define inf_btsdio_is_active(bus_if) false
+#define inf_btsdio_set_bt_reset(bus_if) false
+#define inf_btsdio_inited(bus_if) false
+#define inf_btsdio_debugfs_create(drvr)
+#endif /* CPTCFG_INFFMAC_BT_SHARED_SDIO */
 
 #endif /* BT_SHARED_SDIO_IFX */

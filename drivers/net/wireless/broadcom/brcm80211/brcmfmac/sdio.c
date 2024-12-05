@@ -346,7 +346,7 @@ struct rte_console {
 #define BRCMF_IDLE_INTERVAL	1
 
 #define KSO_WAIT_US 50
-#define KSO_MAX_SEQ_TIME (1000 * 10) /* Ideal time for kso sequence 10ms */
+#define KSO_MAX_SEQ_TIME_NS (1000000 * 10) /* Ideal time for kso sequence 10ms in ns*/
 #define MAX_KSO_ATTEMPTS (PMU_MAX_TRANSITION_DLY/KSO_WAIT_US)
 
 static void brcmf_sdio_firmware_callback(struct device *dev, int err,
@@ -570,7 +570,9 @@ struct brcmf_sdio {
 	u32 store_idx;
 	u32 sent_idx;
 	struct task_ctl	thr_rxf_ctl;
-	spinlock_t	rxf_lock; /* lock for rxf idx protection */
+	spinlock_t rxf_lock;	/* lock for rxf idx protection */
+	bool h1_ddr50_mode;	/* H1 DDR50 Mode enabled*/
+	bool ignore_bus_error;	/* Ignore SDIO Bus access error*/
 };
 
 /* clkstate */
@@ -702,17 +704,18 @@ static const struct brcmf_firmware_mapping brcmf_sdio_fwnames[] = {
 	BRCMF_FW_ENTRY(BRCM_CC_43430_CHIP_ID, 0xFFFFFFE0, 43439),
 	BRCMF_FW_ENTRY(BRCM_CC_4345_CHIP_ID, 0x00000200, 43456),
 	BRCMF_FW_ENTRY(BRCM_CC_4345_CHIP_ID, 0xFFFFFDC0, 43455),
+	BRCMF_FW_ENTRY(BRCM_CC_43454_CHIP_ID, 0x00000040, 43455),
 	BRCMF_FW_ENTRY(BRCM_CC_4354_CHIP_ID, 0xFFFFFFFF, 4354),
 	BRCMF_FW_ENTRY(BRCM_CC_4356_CHIP_ID, 0xFFFFFFFF, 4356),
 	BRCMF_FW_ENTRY(BRCM_CC_4359_CHIP_ID, 0xFFFFFFFF, 4359),
-	BRCMF_FW_ENTRY(CY_CC_43439_CHIP_ID, 0xFFFFFFFF, 43439),
 	BRCMF_FW_ENTRY(CY_CC_4373_CHIP_ID, 0xFFFFFFFF, 4373),
 	BRCMF_FW_ENTRY(CY_CC_43012_CHIP_ID, 0xFFFFFFFF, 43012),
+	BRCMF_FW_ENTRY(CY_CC_43439_CHIP_ID, 0xFFFFFFFF, 43439),
 	BRCMF_FW_ENTRY(CY_CC_43022_CHIP_ID, 0xFFFFFFFF, 43022),
 	BRCMF_FW_ENTRY(CY_CC_43752_CHIP_ID, 0xFFFFFFFF, 43752),
 	BRCMF_FW_ENTRY(CY_CC_89459_CHIP_ID, 0xFFFFFFFF, 89459),
+	BRCMF_FW_ENTRY(CY_CC_55572_CHIP_ID, 0xFFFFFFFF, 55572),
 	BRCMF_FW_ENTRY(CY_CC_55500_CHIP_ID, 0xFFFFFFFF, 55500),
-	BRCMF_FW_ENTRY(CY_CC_55572_CHIP_ID, 0xFFFFFFFF, 55572)
 };
 
 #define TXCTL_CREDITS	2
@@ -730,15 +733,8 @@ static void pkt_align(struct sk_buff *p, int len, int align)
 /* To check if there's window offered */
 static bool data_ok(struct brcmf_sdio *bus)
 {
-	u8 tx_rsv = 0;
-
-	/* Reserve TXCTL_CREDITS credits for txctl when it is ready to send */
-	if (bus->ctrl_frame_stat)
-		tx_rsv = TXCTL_CREDITS;
-
-	return (bus->tx_max - bus->tx_seq - tx_rsv) != 0 &&
-	       ((bus->tx_max - bus->tx_seq - tx_rsv) & 0x80) == 0;
-
+	return (u8)(bus->tx_max - bus->tx_seq) > TXCTL_CREDITS &&
+	       ((u8)(bus->tx_max - bus->tx_seq) & 0x80) == 0;
 }
 
 /* To check if there's window offered */
@@ -755,8 +751,8 @@ brcmf_sdio_kso_control(struct brcmf_sdio *bus, bool on)
 	int err = 0;
 	int err_cnt = 0;
 	int try_cnt = 0;
-	unsigned long start_jiffy = 0;
-	unsigned int kso_loop_time = 0;
+	unsigned long kso_loop_time = 0;
+	struct timespec64 ts_start, ts_end, ts_delta;
 
 	brcmf_dbg(TRACE, "Enter: on=%d\n", on);
 
@@ -769,11 +765,14 @@ brcmf_sdio_kso_control(struct brcmf_sdio *bus, bool on)
 	wr_val = (on << SBSDIO_FUNC1_SLEEPCSR_KSO_SHIFT);
 
 	/* Start time of kso_sequence */
-	start_jiffy = jiffies;
+	ktime_get_ts64(&ts_start);
 
 	/* Change bus width to 1-bit mode before kso 0 */
 	if (!on && bus->idleclock == BRCMF_IDLE_STOP)
 		brcmf_sdio_set_sdbus_clk_width(bus, SDIO_SDMODE_1BIT);
+	else
+	/* Set Flag to ignore SDIO Bus access error during KSO */
+		bus->ignore_bus_error = true;
 
 	/* 1st KSO write goes to AOS wake up core if device is asleep  */
 	brcmf_sdiod_writeb(bus->sdiodev, SBSDIO_FUNC1_SLEEPCSR, wr_val, &err);
@@ -786,9 +785,7 @@ brcmf_sdio_kso_control(struct brcmf_sdio *bus, bool on)
 	if (!on) {
 		bus->sdiodev->sbwad_valid = 0;
 		return err;
-	}
-
-	if (on) {
+	} else {
 		/* device WAKEUP through KSO:
 		 * write bit 0 & read back until
 		 * both bits 0 (kso bit) & 1 (dev on status) are set
@@ -796,13 +793,6 @@ brcmf_sdio_kso_control(struct brcmf_sdio *bus, bool on)
 		cmp_val = SBSDIO_FUNC1_SLEEPCSR_KSO_MASK |
 			  SBSDIO_FUNC1_SLEEPCSR_DEVON_MASK;
 		bmask = cmp_val;
-	} else {
-		/* Put device to sleep, turn off KSO */
-		cmp_val = 0;
-		/* only check for bit0, bit1(dev on status) may not
-		 * get cleared right away
-		 */
-		bmask = SBSDIO_FUNC1_SLEEPCSR_KSO_MASK;
 	}
 
 	do {
@@ -848,24 +838,43 @@ brcmf_sdio_kso_control(struct brcmf_sdio *bus, bool on)
 
 	} while (try_cnt++ < MAX_KSO_ATTEMPTS);
 
-	kso_loop_time = jiffies_to_usecs(jiffies - start_jiffy);
+	ktime_get_ts64(&ts_end);
+	ts_delta = timespec64_sub(ts_end, ts_start);
+	kso_loop_time = timespec64_to_ns(&ts_delta);
 
 	if (try_cnt > MAX_KSO_ATTEMPTS)
-		brcmf_err("ERR: KSO=%d sequence failed after max tries=%d and err_cnt=%d kso_seq_time=%uus rd_val=0x%x err=%d\n",
-			  on, try_cnt, err_cnt, kso_loop_time, rd_val, err);
-
-	if (kso_loop_time > KSO_MAX_SEQ_TIME)
-		brcmf_dbg(SDIO, "WARN: KSO=%d sequence took %uus > expected %uus try_cnt=%d err_cnt=%d rd_val=0x%x err=%d\n",
-			  on, kso_loop_time, KSO_MAX_SEQ_TIME, try_cnt, err_cnt, rd_val, err);
-	else
-		brcmf_dbg(SDIO, "INFO: KSO=%d try_cnt=%d err_cnt=%d kso_seq_time=%uus rd_val=0x%x err=%d\n",
-			  on, try_cnt, err_cnt, kso_loop_time, rd_val, err);
+		brcmf_err("ERR: KSO=%d sequence failed after max tries=%d and err_cnt=%d\n"
+			  "kso_seq_time=%luns rd_val=0x%x err=%d\n",
+			   on, try_cnt, err_cnt, kso_loop_time, rd_val, err);
 
 	if (on && bus->idleclock == BRCMF_IDLE_STOP) {
 		/* Change the bus width to 4-bit mode on kso 1 */
 		brcmf_sdio_set_sdbus_clk_width(bus, SDIO_SDMODE_4BIT);
+
+		/* New KSO Sequence for H1 DDR50 Mode*/
+		if (bus->h1_ddr50_mode) {
+			struct brcmf_sdio_dev *sdiod = bus->sdiodev;
+			u32 ret, chipid;
+
+			chipid = brcmf_sdiod_readl(sdiod,
+						   bus->ci->ccsec->bus_corebase + SD_REG(chipid),
+						   &ret);
+			brcmf_dbg(SDIO, "chipid: 0x%x ret = 0x%x\n", chipid, ret);
+		}
+
+		/* Clear Flag to ignore SDIO Bus access error during KSO */
+		bus->ignore_bus_error = false;
 		sdio_retune_release(bus->sdiodev->func1);
 	}
+
+	if (kso_loop_time > KSO_MAX_SEQ_TIME_NS)
+		brcmf_err("ERR: KSO=%d sequence took %luns > expected %uns try_cnt=%d\n"
+			  "err_cnt=%d rd_val=0x%x err=%d\n",
+			   on, kso_loop_time, KSO_MAX_SEQ_TIME_NS, try_cnt, err_cnt, rd_val, err);
+
+	brcmf_dbg(SDIO, "INFO: KSO=%d try_cnt=%d err_cnt=%d kso_seq_time=%luns\n"
+			"rd_val=0x%x err=%d\n", on, try_cnt, err_cnt, kso_loop_time, rd_val, err);
+
 	sdio_retune_crc_enable(bus->sdiodev->func1);
 
 	return err;
@@ -1095,13 +1104,13 @@ int brcmf_sdio_clkctl(struct brcmf_sdio *bus, uint target, bool pendok)
 			break;
 		}
 #endif /* CPTCFG_BRCMFMAC_BT_SHARED_SDIO */
-#ifdef CPTCFG_IFX_BT_SHARED_SDIO
-		if (ifx_btsdio_is_active(bus->sdiodev->bus_if)) {
+#ifdef CPTCFG_INFFMAC_BT_SHARED_SDIO
+		if (inf_btsdio_is_active(bus->sdiodev->bus_if)) {
 			brcmf_dbg(SDIO, "BT is active, not switching to CLK_SDONLY\n");
 			brcmf_sdio_wd_timer(bus, true);
 			break;
 		}
-#endif /* CPTCFG_IFX_BT_SHARED_SDIO */
+#endif /* CPTCFG_INFFMAC_BT_SHARED_SDIO */
 		/* Remove HT request, or bring up SD clock */
 		if (bus->clkstate == CLK_NONE)
 			brcmf_sdio_sdclk(bus, true);
@@ -1125,12 +1134,12 @@ int brcmf_sdio_clkctl(struct brcmf_sdio *bus, uint target, bool pendok)
 			break;
 		}
 #endif /* CPTCFG_BRCMFMAC_BT_SHARED_SDIO */
-#ifdef CPTCFG_IFX_BT_SHARED_SDIO
-		if (ifx_btsdio_is_active(bus->sdiodev->bus_if)) {
+#ifdef CPTCFG_INFFMAC_BT_SHARED_SDIO
+		if (inf_btsdio_is_active(bus->sdiodev->bus_if)) {
 			brcmf_dbg(SDIO, "BT is active, not switching to CLK_NONE\n");
 			break;
 		}
-#endif /* CPTCFG_IFX_BT_SHARED_SDIO */
+#endif /* CPTCFG_INFFMAC_BT_SHARED_SDIO */
 
 		/* Make sure to remove HT request */
 		if (bus->clkstate == CLK_AVAIL)
@@ -1173,12 +1182,12 @@ brcmf_sdio_bus_sleep(struct brcmf_sdio *bus, bool sleep, bool pendok)
 		return -EBUSY;
 	}
 #endif /* CPTCFG_BRCMFMAC_BT_SHARED_SDIO */
-#ifdef CPTCFG_IFX_BT_SHARED_SDIO
-	if (sleep && ifx_btsdio_is_active(bus->sdiodev->bus_if)) {
+#ifdef CPTCFG_INFFMAC_BT_SHARED_SDIO
+	if (sleep && inf_btsdio_is_active(bus->sdiodev->bus_if)) {
 		brcmf_dbg(SDIO, "Bus cannot sleep when BT is active\n");
 		return -EBUSY;
 	}
-#endif /* CPTCFG_IFX_BT_SHARED_SDIO */
+#endif /* CPTCFG_INFFMAC_BT_SHARED_SDIO */
 
 	brcmf_dbg(SDIO, "Enter: request %s currently %s\n",
 		  (sleep ? "SLEEP" : "WAKE"),
@@ -1239,7 +1248,7 @@ done:
 
 bool brcmf_sdio_bus_sleep_state(struct brcmf_sdio *bus)
 {
-	return bus->sleeping;
+	return bus->sleeping && !bus->ignore_bus_error;
 }
 
 #ifdef DEBUG
@@ -1938,7 +1947,7 @@ static u8 brcmf_sdio_rxglom(struct brcmf_sdio *bus, u8 rxseq)
 
 		/* Do an SDIO read for the superframe.  Configurable iovar to
 		 * read directly into the chained packet, or allocate a large
-		 * packet and and copy into the chain.
+		 * packet and copy into the chain.
 		 */
 		sdio_claim_host(bus->sdiodev->func1);
 		errcode = brcmf_sdiod_recv_chain(bus->sdiodev,
@@ -2193,7 +2202,7 @@ static bool brcmf_sdio_rx_pkt_is_avail(struct brcmf_sdio *bus)
 	int err = 0;
 	bool ret = true;
 
-	if (!ifx_btsdio_is_active(bus->sdiodev->bus_if))
+	if (!inf_btsdio_is_active(bus->sdiodev->bus_if))
 		return true;
 
 	/* read interrupt to get fifo status*/
@@ -2717,7 +2726,7 @@ static uint brcmf_sdio_sendfromq(struct brcmf_sdio *bus, uint maxframes)
 	u32 intstatus = 0;
 	int ret = 0, prec_out, i;
 	uint cnt = 0;
-	u8 tx_prec_map, pkt_num;
+	u8 tx_prec_map, pkt_num, que_cnt;
 
 	brcmf_dbg(TRACE, "Enter\n");
 
@@ -2726,9 +2735,12 @@ static uint brcmf_sdio_sendfromq(struct brcmf_sdio *bus, uint maxframes)
 	/* Send frames until the limit or some other event */
 	for (cnt = 0; (cnt < maxframes) && data_ok(bus);) {
 		pkt_num = 1;
-		if (bus->txglom)
-			pkt_num = min_t(u8, bus->tx_max - bus->tx_seq,
+		que_cnt = bus->tx_max - bus->tx_seq;
+		if (bus->txglom) {
+			pkt_num = min_t(u8, que_cnt - TXCTL_CREDITS,
 					bus->sdiodev->txglomsz);
+		}
+
 		pkt_num = min_t(u32, pkt_num,
 				brcmu_pktq_mlen(&bus->txq, ~bus->flowcontrol));
 		__skb_queue_head_init(&pktq);
@@ -3499,6 +3511,14 @@ static int brcmf_sdio_readconsole(struct brcmf_sdio *bus)
 
 	/* Read the console buffer */
 	addr = le32_to_cpu(c->log_le.buf);
+
+	/* During FW Control Switch from Bootloader to Ram
+	 * Console address read will return all 0's which is not a valid.
+	 * when we try to access 0 ram address we are getting SDIO error.
+	 */
+	if (addr == 0)
+		return 0;
+
 	rv = brcmf_sdiod_ramrw(bus->sdiodev, false, addr, c->buf, c->bufsize);
 	if (rv < 0)
 		return rv;
@@ -3990,7 +4010,10 @@ static int brcmf_sdio_download_code_file(struct brcmf_sdio *bus,
 			err = -EIO;
 	} else {
 		if (trx->magic == cpu_to_le32(TRX_MAGIC)) {
-			address -= sizeof(struct trx_header_le);
+			if ((trx->flag_version >> 16) == TRX_VERSION5)
+				address -= sizeof(struct trxv5_header_le);
+			else
+				address -= sizeof(struct trx_header_le);
 			fw_size = le32_to_cpu(trx->len);
 		}
 
@@ -4525,7 +4548,7 @@ static void brcmf_sdio_bus_watchdog(struct brcmf_sdio *bus)
 #endif				/* DEBUG */
 
 	/* On idle timeout clear activity flag and/or turn off clock */
-	if (!bus->dpc_triggered && !ifx_btsdio_is_active(bus->sdiodev->bus_if) &&
+	if (!bus->dpc_triggered && !inf_btsdio_is_active(bus->sdiodev->bus_if) &&
 	    brcmf_btsdio_bus_count(bus->sdiodev->bus_if) == 0) {
 		rmb();
 		if ((!bus->dpc_running) && (bus->idletime > 0) &&
@@ -4540,7 +4563,12 @@ static void brcmf_sdio_bus_watchdog(struct brcmf_sdio *bus)
 #endif
 					brcmf_sdio_wd_timer(bus, false);
 				bus->idlecount = 0;
-				brcmf_sdio_bus_sleep(bus, true, false);
+
+				if (!bus->dpc_triggered && !bus->dpc_running)
+					brcmf_sdio_bus_sleep(bus, true, false);
+				else
+					brcmf_err("DPC active Skip sleep");
+
 				sdio_release_host(bus->sdiodev->func1);
 			}
 		} else {
@@ -4875,6 +4903,20 @@ brcmf_sdio_buscore_sec_attach(void *ctx, struct brcmf_blhs **blhs, struct brcmf_
 		*ccsec = ccsech;
 	}
 
+	if (cardcap & SDIO_CCCR_BRCM_CARDCAP_CHIPID_PRESENT) {
+		u32 reg_val;
+		u32 err;
+
+		/* Get SDIO Bus Mode*/
+		reg_val = brcmf_sdiod_func0_rb(sdiodev, SDIO_CCCR_SPEED, &err);
+		if (err) {
+			brcmf_err("error getting sdio bus speed\n");
+		} else {
+			if (reg_val & SDIO_SPEED_DDR50)
+				sdiodev->bus->h1_ddr50_mode = true;
+		}
+	}
+
 	return 0;
 }
 
@@ -4980,6 +5022,14 @@ brcmf_sdio_probe_attach(struct brcmf_sdio *bus)
 		brcmf_err("Failed to get device parameters\n");
 		goto fail;
 	}
+
+	if (sdiodev->settings->bus.sdio.oob_irq_supported) {
+		/*Below Module Params are not supported in OOB mode*/
+		sdiodev->settings->sdio_in_isr = 0;
+		sdiodev->settings->sdio_rxf_in_kthread_enabled = 0;
+		brcmf_dbg(TRACE, "OOB Enabled, Disable sdio_in_isr\n");
+	}
+
 	/* platform specific configuration:
 	 *   alignments must be at least 4 bytes for ADMA
 	 */
@@ -4996,15 +5046,14 @@ brcmf_sdio_probe_attach(struct brcmf_sdio *bus)
 	 */
 	brcmf_sdiod_sgtable_alloc(sdiodev);
 
-#ifdef CONFIG_PM_SLEEP
 	/* wowl can be supported when KEEP_POWER is true and (WAKE_SDIO_IRQ
 	 * is true or when platform data OOB irq is true).
 	 */
-	if ((sdio_get_host_pm_caps(sdiodev->func1) & MMC_PM_KEEP_POWER) &&
+	if (IS_ENABLED(CONFIG_PM_SLEEP) &&
+	    (sdio_get_host_pm_caps(sdiodev->func1) & MMC_PM_KEEP_POWER) &&
 	    ((sdio_get_host_pm_caps(sdiodev->func1) & MMC_PM_WAKE_SDIO_IRQ) ||
 	     (sdiodev->settings->bus.sdio.oob_irq_supported)))
 		sdiodev->bus_if->wowl_supported = true;
-#endif
 
 	if (brcmf_sdio_kso_init(bus)) {
 		brcmf_err("error enabling KSO\n");
@@ -5101,7 +5150,7 @@ brcmf_sdio_rxf_thread(void *data)
 	 */
 	memset(&param, 0, sizeof(struct sched_param));
 	param.sched_priority = 1;
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 9, 0))
+#if (KERNEL_VERSION(5, 9, 0) <= LINUX_VERSION_CODE)
 	if (param.sched_priority >= MAX_RT_PRIO / 2)
 		/* If the priority is MAX_RT_PRIO/2 or higher,
 		 * it is considered as high priority.
@@ -5116,7 +5165,7 @@ brcmf_sdio_rxf_thread(void *data)
 		sched_set_fifo_low(current);
 #else
 	sched_setscheduler(current, SCHED_FIFO, &param);
-#endif /* LINUX_VERSION_CODE >= KERNEL_VERSION(5, 9, 0) */
+#endif /* KERNEL_VERSION(5, 9, 0) <= LINUX_VERSION_CODE */
 
 	while (1) {
 		if (kthread_should_stop())
@@ -5136,7 +5185,7 @@ brcmf_sdio_rxf_thread(void *data)
 				struct sk_buff *skbnext = skb->next;
 
 				skb->next = NULL;
-				netif_rx_ni(skb);
+				netif_rx(skb);
 				skb = skbnext;
 			}
 		} else {
@@ -5187,23 +5236,24 @@ brcmf_sdio_watchdog(struct timer_list *t)
 	}
 }
 
-static
-int brcmf_sdio_get_fwname(struct device *dev, const char *ext, u8 *fw_name)
+static int brcmf_sdio_get_blob(struct device *dev, const struct firmware **fw,
+			       enum brcmf_blob_type type)
 {
 	struct brcmf_bus *bus_if = dev_get_drvdata(dev);
-	struct brcmf_fw_request *fwreq;
-	struct brcmf_fw_name fwnames[] = {
-		{ ext, fw_name },
-	};
+	struct brcmf_sdio_dev *sdiodev = bus_if->bus_priv.sdio;
 
-	fwreq = brcmf_fw_alloc_request(bus_if->chip, bus_if->chiprev,
-				       brcmf_sdio_fwnames,
-				       ARRAY_SIZE(brcmf_sdio_fwnames),
-				       fwnames, ARRAY_SIZE(fwnames));
-	if (!fwreq)
-		return -ENOMEM;
+	switch (type) {
+	case BRCMF_BLOB_CLM:
+		*fw = sdiodev->clm_fw;
+		sdiodev->clm_fw = NULL;
+		break;
+	default:
+		return -ENOENT;
+	}
 
-	kfree(fwreq);
+	if (!*fw)
+		return -ENOENT;
+
 	return 0;
 }
 
@@ -5221,7 +5271,7 @@ static int brcmf_sdio_bus_reset(struct device *dev)
 
 	/* reset the adapter */
 	sdio_claim_host(sdiodev->func1);
-	mmc_hw_reset(sdiodev->func1->card->host);
+	mmc_hw_reset(sdiodev->func1->card);
 	sdio_release_host(sdiodev->func1);
 
 	brcmf_bus_change_state(sdiodev->bus_if, BRCMF_BUS_DOWN);
@@ -5252,7 +5302,7 @@ static const struct brcmf_bus_ops brcmf_sdio_bus_ops = {
 	.wowl_config = brcmf_sdio_wowl_config,
 	.get_ramsize = brcmf_sdio_bus_get_ramsize,
 	.get_memdump = brcmf_sdio_bus_get_memdump,
-	.get_fwname = brcmf_sdio_get_fwname,
+	.get_blob = brcmf_sdio_get_blob,
 	.debugfs_create = brcmf_sdio_debugfs_create,
 	.reset = brcmf_sdio_bus_reset,
 	.set_fcmode = brcmf_sdio_bus_set_fcmode
@@ -5260,6 +5310,7 @@ static const struct brcmf_bus_ops brcmf_sdio_bus_ops = {
 
 #define BRCMF_SDIO_FW_CODE	0
 #define BRCMF_SDIO_FW_NVRAM	1
+#define BRCMF_SDIO_FW_CLM	2
 
 static void brcmf_sdio_firmware_callback(struct device *dev, int err,
 					 struct brcmf_fw_request *fwreq)
@@ -5282,6 +5333,7 @@ static void brcmf_sdio_firmware_callback(struct device *dev, int err,
 	code = fwreq->items[BRCMF_SDIO_FW_CODE].binary;
 	nvram = fwreq->items[BRCMF_SDIO_FW_NVRAM].nv_data.data;
 	nvram_len = fwreq->items[BRCMF_SDIO_FW_NVRAM].nv_data.len;
+	sdiod->clm_fw = fwreq->items[BRCMF_SDIO_FW_CLM].binary;
 	kfree(fwreq);
 
 	/* try to download image and nvram to the dongle */
@@ -5502,7 +5554,7 @@ static void brcmf_sdio_firmware_callback(struct device *dev, int err,
 			goto free;
 		}
 
-		ifx_btsdio_init(bus_if);
+		inf_btsdio_init(bus_if);
 
 		/* Register for ULP events */
 		if (sdiod->func1->device == SDIO_DEVICE_ID_BROADCOM_CYPRESS_43012 ||
@@ -5557,7 +5609,7 @@ static struct brcmf_fw_request *
 brcmf_sdio_prepare_fw_request(struct brcmf_sdio *bus)
 {
 	struct brcmf_fw_request *fwreq;
-	struct brcmf_fw_name fwnames[2];
+	struct brcmf_fw_name fwnames[3];
 
 	if (bus->ci->blhs) {
 		/* 43022 : secure-mode supports .trxs image only */
@@ -5578,6 +5630,9 @@ brcmf_sdio_prepare_fw_request(struct brcmf_sdio *bus)
 	fwnames[0].path = bus->sdiodev->fw_name;
 	fwnames[1].extension = ".txt";
 	fwnames[1].path = bus->sdiodev->nvram_name;
+	
+	fwnames[2].extension = ".clm_blob";
+	fwnames[2].path = bus->sdiodev->clm_name;
 
 	fwreq = brcmf_fw_alloc_request(bus->ci->chip, bus->ci->chiprev,
 				       brcmf_sdio_fwnames,
@@ -5595,7 +5650,9 @@ brcmf_sdio_prepare_fw_request(struct brcmf_sdio *bus)
 		fwreq->items[BRCMF_SDIO_FW_CODE].type = BRCMF_FW_TYPE_BINARY;
 	}
 	fwreq->items[BRCMF_SDIO_FW_NVRAM].type = BRCMF_FW_TYPE_NVRAM;
-	fwreq->board_type = bus->sdiodev->settings->board_type;
+	fwreq->items[BRCMF_SDIO_FW_CLM].type = BRCMF_FW_TYPE_BINARY;
+	fwreq->items[BRCMF_SDIO_FW_CLM].flags = BRCMF_FW_REQF_OPTIONAL;
+	fwreq->board_types[0] = bus->sdiodev->settings->board_type;
 
 	return fwreq;
 }
@@ -5702,8 +5759,6 @@ struct brcmf_sdio *brcmf_sdio_probe(struct brcmf_sdio_dev *sdiodev)
 	else
 		bus->idletime = BRCMF_IDLE_INTERVAL;
 
-	bus->idleclock = BRCMF_IDLE_ACTIVE;
-
 	/* SR state */
 	bus->sr_enabled = false;
 
@@ -5794,7 +5849,7 @@ void brcmf_sdio_remove(struct brcmf_sdio *bus)
 						 * to be set for SDIO reset
 						 */
 						reg_val |= SDIO_CCCR_BRCM_CARDCTRL_WLANRESET;
-						if (ifx_btsdio_set_bt_reset(bus_if))
+						if (inf_btsdio_set_bt_reset(bus_if))
 							reg_val |= SDIO_CCCR_BRCM_CARDCTRL_BTRESET;
 						brcmf_sdiod_func0_wb(bus->sdiodev,
 								     SDIO_CCCR_BRCM_CARDCTRL,
@@ -5852,7 +5907,7 @@ void brcmf_sdio_remove(struct brcmf_sdio *bus)
 									       SDIO_CCCR_BRCM_CARDCTRL,
 									       &err);
 						reg_val |= SDIO_CCCR_BRCM_CARDCTRL_WLANRESET;
-                                                if (ifx_btsdio_set_bt_reset(bus_if))
+                                                if (inf_btsdio_set_bt_reset(bus_if))
                                                         reg_val |= SDIO_CCCR_BRCM_CARDCTRL_BTRESET;
 						brcmf_sdiod_func0_wb(sdiodev,
 								     SDIO_CCCR_BRCM_CARDCTRL,
@@ -5886,8 +5941,14 @@ void brcmf_sdio_remove(struct brcmf_sdio *bus)
 		brcmf_btsdio_detach(bus_if);
 #endif /* CPTCFG_BRCMFMAC_BT_SHARED_SDIO */
 
-		ifx_btsdio_deinit(bus_if);
-
+		release_firmware(bus->sdiodev->clm_fw);
+		bus->sdiodev->clm_fw = NULL;
+		inf_btsdio_deinit(bus_if);
+#if IS_BUILTIN(CONFIG_MMC)
+		sdio_claim_host(bus->sdiodev->func1);
+		mmc_hw_reset(bus->sdiodev->func1->card);
+		sdio_release_host(bus->sdiodev->func1);
+#endif
 		kfree(bus->rxbuf);
 		kfree(bus->hdrbuf);
 		kfree(bus);

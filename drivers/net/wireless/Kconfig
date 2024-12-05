@@ -28,9 +28,11 @@ source "drivers/net/wireless/broadcom/Kconfig"
 #source "drivers/net/wireless/marvell/Kconfig"
 #source "drivers/net/wireless/mediatek/Kconfig"
 #source "drivers/net/wireless/microchip/Kconfig"
+#source "drivers/net/wireless/purelifi/Kconfig"
 #source "drivers/net/wireless/ralink/Kconfig"
 #source "drivers/net/wireless/realtek/Kconfig"
 #source "drivers/net/wireless/rsi/Kconfig"
+#source "drivers/net/wireless/silabs/Kconfig"
 #source "drivers/net/wireless/st/Kconfig"
 #source "drivers/net/wireless/ti/Kconfig"
 #source "drivers/net/wireless/zydas/Kconfig"
@@ -67,6 +69,7 @@ config PCMCIA_WL3501
 	  micro support for ethtool.
 
 config MAC80211_HWSIM
+	depends on !KERNEL_4_19
 	depends on n
 	tristate "Simulated radio testing tool for mac80211"
 	depends on m
@@ -82,7 +85,6 @@ config MAC80211_HWSIM
 	  called mac80211_hwsim.  If unsure, say N.
 
 config USB_NET_RNDIS_WLAN
-	depends on !KERNEL_4_6
 	depends on n
 	tristate "Wireless RNDIS USB support"
 	depends on m

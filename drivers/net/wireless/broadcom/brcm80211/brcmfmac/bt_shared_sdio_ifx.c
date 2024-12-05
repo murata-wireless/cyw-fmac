@@ -45,9 +45,9 @@
 #include "common.h"
 
 /* make sure BTS version is the same as bt drier */
-#define BTS_VER_MAJOR 1
-#define BTS_VER_MINOR 1
-#define BTS_VER_PATCH 1
+#define BTS_VER_MAJOR 2
+#define BTS_VER_MINOR 0
+#define BTS_VER_PATCH 0
 #define BTS_VERSION (BTS_VER_MAJOR << 24 | BTS_VER_MINOR << 16 | BTS_VER_PATCH << 8)
 
 /* make sure bt_shared_info is the same as bt drier */
@@ -110,13 +110,13 @@ struct bts_cmd_entity {
 };
 
 /**
- * struct ifx_bt_if - bt shared SDIO information.
+ * struct inf_bt_if - bt shared SDIO information.
  *
  * @ bt_data: bt internal structure data
  * @ bt_sdio_int_cb: bt registered interrupt callback function
  * @ bt_use_count: Counter that tracks whether BT is using the bus
  */
-struct ifx_bt_if {
+struct inf_bt_if {
 	void *bt_data;
 	void (*bt_sdio_int_cb)(void *data);
 	u32 use_count; /* Counter for tracking if BT is using the bus */
@@ -130,7 +130,7 @@ struct ifx_bt_if {
 	struct list_head err_list;
 };
 
-bool ifx_btsdio_inited(struct brcmf_bus *bus_if)
+bool inf_btsdio_inited(struct brcmf_bus *bus_if)
 {
 	if (!bus_if) {
 		brcmf_err("bus_if is null\n");
@@ -143,7 +143,7 @@ bool ifx_btsdio_inited(struct brcmf_bus *bus_if)
 	return true;
 }
 
-static char *_btsdio_err_char(enum bts_err_type type)
+static char *inf_btsdio_err_char(enum bts_err_type type)
 {
 	switch (type) {
 	case ERR_REG_RB:
@@ -165,7 +165,7 @@ static char *_btsdio_err_char(enum bts_err_type type)
 	}
 }
 
-static void _btsdio_err_free_all(struct ifx_bt_if *bt_if)
+static void inf_btsdio_err_free_all(struct inf_bt_if *bt_if)
 {
 	struct bts_cmd_entity *cmd = NULL;
 	struct bts_cmd_entity *next = NULL;
@@ -183,7 +183,7 @@ static void _btsdio_err_free_all(struct ifx_bt_if *bt_if)
 	spin_unlock(&bt_if->err_list_lock);
 }
 
-static int _btsdio_cmd_alloc(struct ifx_bt_if *bt_if,
+static int inf_btsdio_cmd_alloc(struct inf_bt_if *bt_if,
 			     struct bts_cmd_entity **cmd, enum bts_err_type type, int err)
 {
 	if (!bt_if || !cmd) {
@@ -208,7 +208,7 @@ static int _btsdio_cmd_alloc(struct ifx_bt_if *bt_if,
 	return 0;
 }
 
-static void _btsdio_err_enq(struct ifx_bt_if *bt_if, struct bts_cmd_entity *cmd)
+static void inf_btsdio_err_enq(struct inf_bt_if *bt_if, struct bts_cmd_entity *cmd)
 {
 	if (!bt_if || !cmd) {
 		brcmf_err("bt_if(%p) or cmd(%p) is null\n", bt_if, cmd);
@@ -220,8 +220,8 @@ static void _btsdio_err_enq(struct ifx_bt_if *bt_if, struct bts_cmd_entity *cmd)
 	spin_unlock(&bt_if->err_list_lock);
 }
 
-static void _btsdio_err_reg_record(struct ifx_bt_if *bt_if,
-				   enum bts_err_type type, int err, u8 fn, u32 addr, u32 val)
+static void inf_btsdio_err_reg_record(struct inf_bt_if *bt_if,
+				      enum bts_err_type type, int err, u8 fn, u32 addr, u32 val)
 {
 	struct bts_cmd_entity *cmd = NULL;
 	struct bts_err_reg *reg = NULL;
@@ -231,7 +231,7 @@ static void _btsdio_err_reg_record(struct ifx_bt_if *bt_if,
 		return;
 	}
 
-	if (_btsdio_cmd_alloc(bt_if, &cmd, type, err))
+	if (inf_btsdio_cmd_alloc(bt_if, &cmd, type, err))
 		return;
 
 	reg = &cmd->u.reg;
@@ -239,14 +239,14 @@ static void _btsdio_err_reg_record(struct ifx_bt_if *bt_if,
 	reg->addr = addr;
 	reg->val = val;
 	brcmf_err("[%5lld.%06ld] %8s err: %d\taddr: 0x%x\tval: 0x%x\n",
-		  (long long)cmd->time.tv_sec, cmd->time.tv_nsec / NSEC_PER_USEC,
-		  _btsdio_err_char(cmd->type), err, addr, val);
+		  cmd->time.tv_sec, cmd->time.tv_nsec / NSEC_PER_USEC,
+		  inf_btsdio_err_char(cmd->type), err, addr, val);
 
-	_btsdio_err_enq(bt_if, cmd);
+	inf_btsdio_err_enq(bt_if, cmd);
 }
 
-static void _btsdio_err_buf_record(struct ifx_bt_if *bt_if,
-				   enum bts_err_type type, int err, u32 nbytes)
+static void inf_btsdio_err_buf_record(struct inf_bt_if *bt_if,
+				      enum bts_err_type type, int err, u32 nbytes)
 {
 	struct bts_cmd_entity *cmd = NULL;
 	struct bts_err_buf *buf = NULL;
@@ -256,19 +256,20 @@ static void _btsdio_err_buf_record(struct ifx_bt_if *bt_if,
 		return;
 	}
 
-	if (_btsdio_cmd_alloc(bt_if, &cmd, type, err))
+	if (inf_btsdio_cmd_alloc(bt_if, &cmd, type, err))
 		return;
 
 	buf = &cmd->u.buf;
 	buf->nbytes = nbytes;
 	brcmf_err("[%5lld.%06ld] %8s err: %d\tnbytes: %d\n",
-		  (long long)cmd->time.tv_sec, cmd->time.tv_nsec / NSEC_PER_USEC,
-		  _btsdio_err_char(cmd->type), err, nbytes);
+		  cmd->time.tv_sec, cmd->time.tv_nsec / NSEC_PER_USEC,
+		  inf_btsdio_err_char(cmd->type), err, nbytes);
 
-	_btsdio_err_enq(bt_if, cmd);
+	inf_btsdio_err_enq(bt_if, cmd);
 }
 
-static void _btsdio_err_mem_record(struct ifx_bt_if *bt_if, int err, bool set, u32 addr, u32 size)
+static void inf_btsdio_err_mem_record(struct inf_bt_if *bt_if,
+				      int err, bool set, u32 addr, u32 size)
 {
 	struct bts_cmd_entity *cmd = NULL;
 	struct bts_err_mem *mem = NULL;
@@ -278,7 +279,7 @@ static void _btsdio_err_mem_record(struct ifx_bt_if *bt_if, int err, bool set, u
 		return;
 	}
 
-	if (_btsdio_cmd_alloc(bt_if, &cmd, ERR_MEM_RW, err))
+	if (inf_btsdio_cmd_alloc(bt_if, &cmd, ERR_MEM_RW, err))
 		return;
 
 	mem = &cmd->u.mem;
@@ -286,13 +287,13 @@ static void _btsdio_err_mem_record(struct ifx_bt_if *bt_if, int err, bool set, u
 	mem->addr = addr;
 	mem->size = size;
 	brcmf_err("[%5lld.%06ld] %8s err: %d\tset: %d\taddr: 0x%x\tsize: %d\n",
-		  (long long)cmd->time.tv_sec, cmd->time.tv_nsec / NSEC_PER_USEC,
-		  _btsdio_err_char(cmd->type), err, set, addr, size);
+		  cmd->time.tv_sec, cmd->time.tv_nsec / NSEC_PER_USEC,
+		  inf_btsdio_err_char(cmd->type), err, set, addr, size);
 
-	_btsdio_err_enq(bt_if, cmd);
+	inf_btsdio_err_enq(bt_if, cmd);
 }
 
-static void _btsdio_err_dump(struct seq_file *seq, struct ifx_bt_if *bt_if)
+static void inf_btsdio_err_dump(struct seq_file *seq, struct inf_bt_if *bt_if)
 {
 	struct bts_cmd_entity *cmd = NULL;
 	struct bts_err_reg *reg = NULL;
@@ -311,8 +312,8 @@ static void _btsdio_err_dump(struct seq_file *seq, struct ifx_bt_if *bt_if)
 	spin_lock(&bt_if->err_list_lock);
 	list_for_each_entry(cmd, &bt_if->err_list, list) {
 		seq_printf(seq, "%3d: [%5lld.%06ld] %8s err: %d\t",
-			   ++idx, (long long)cmd->time.tv_sec, cmd->time.tv_nsec / NSEC_PER_USEC,
-			   _btsdio_err_char(cmd->type), cmd->err);
+			   ++idx, cmd->time.tv_sec, cmd->time.tv_nsec / NSEC_PER_USEC,
+			   inf_btsdio_err_char(cmd->type), cmd->err);
 		switch (cmd->type) {
 		case ERR_REG_RB:
 		case ERR_REG_RL:
@@ -345,11 +346,11 @@ static void _btsdio_err_dump(struct seq_file *seq, struct ifx_bt_if *bt_if)
 	spin_unlock(&bt_if->err_list_lock);
 }
 
-static int _btsdio_debugfs_read(struct seq_file *seq, void *data)
+static int inf_btsdio_debugfs_read(struct seq_file *seq, void *data)
 {
 	struct brcmf_bus *bus_if = NULL;
 	struct brcmf_sdio_dev *sdiodev = NULL;
-	struct ifx_bt_if *bt_if = NULL;
+	struct inf_bt_if *bt_if = NULL;
 	struct mmc_host *host = NULL;
 
 	if (!seq || !data) {
@@ -358,7 +359,7 @@ static int _btsdio_debugfs_read(struct seq_file *seq, void *data)
 	}
 	bus_if = dev_get_drvdata(seq->private);
 
-	if (!ifx_btsdio_inited(bus_if)) {
+	if (!inf_btsdio_inited(bus_if)) {
 		seq_printf(seq, "Invalid bus_if (%p) or bt_if\n", bus_if);
 		return 0;
 	}
@@ -402,12 +403,12 @@ static int _btsdio_debugfs_read(struct seq_file *seq, void *data)
 		   "F2", sdiodev->func2->cur_blksize,
 		   "F3", sdiodev->func3->cur_blksize);
 
-	_btsdio_err_dump(seq, bt_if);
+	inf_btsdio_err_dump(seq, bt_if);
 
 	return 0;
 }
 
-static void *_btsdio_get_func_entity(struct brcmf_sdio_dev *sdiodev, u8 fn)
+static void *inf_btsdio_get_func_entity(struct brcmf_sdio_dev *sdiodev, u8 fn)
 {
 	struct sdio_func *func = NULL;
 
@@ -430,7 +431,7 @@ static void _btsdio_int_handler(struct sdio_func *func)
 {
 	struct brcmf_bus *bus_if = NULL;
 	struct brcmf_sdio_dev *sdiodev = NULL;
-	struct ifx_bt_if *bt_if = NULL;
+	struct inf_bt_if *bt_if = NULL;
 
 	if (!func) {
 		brcmf_err("func is null\n");
@@ -454,9 +455,9 @@ static void _btsdio_int_handler(struct sdio_func *func)
 		bt_if->bt_sdio_int_cb(bt_if->bt_data);
 }
 
-bool ifx_btsdio_is_active(struct brcmf_bus *bus_if)
+bool inf_btsdio_is_active(struct brcmf_bus *bus_if)
 {
-	struct ifx_bt_if *bt_if = NULL;
+	struct inf_bt_if *bt_if = NULL;
 
 	if (!bus_if) {
 		brcmf_err("bus_if is null\n");
@@ -474,7 +475,7 @@ bool ifx_btsdio_is_active(struct brcmf_bus *bus_if)
 	return true;
 }
 
-bool ifx_btsdio_set_bt_reset(struct brcmf_bus *bus_if)
+bool inf_btsdio_set_bt_reset(struct brcmf_bus *bus_if)
 {
 	if (!bus_if) {
 		brcmf_err("bus_if is null\n");
@@ -487,11 +488,11 @@ bool ifx_btsdio_set_bt_reset(struct brcmf_bus *bus_if)
 	return bus_if->bt_if->set_bt_reset;
 }
 
-int ifx_bus_attach(u32 ver, void *info)
+int inf_bus_attach(u32 ver, void *info)
 {
 	struct bt_shared_info *bts_info = NULL;
 	struct brcmf_sdio_dev *sdiodev = NULL;
-	struct ifx_bt_if *bt_if = NULL;
+	struct inf_bt_if *bt_if = NULL;
 
 	brcmf_dbg(INFO, "Enter\n");
 
@@ -534,11 +535,11 @@ int ifx_bus_attach(u32 ver, void *info)
 		  sdiodev->func1->device, bts_info->enum_addr);
 	return 0;
 }
-EXPORT_SYMBOL(ifx_bus_attach);
+EXPORT_SYMBOL(inf_bus_attach);
 
-void ifx_bus_detach(struct brcmf_bus *bus_if)
+void inf_bus_detach(struct brcmf_bus *bus_if)
 {
-	struct ifx_bt_if *bt_if = NULL;
+	struct inf_bt_if *bt_if = NULL;
 
 	brcmf_dbg(INFO, "Enter\n");
 
@@ -560,9 +561,9 @@ void ifx_bus_detach(struct brcmf_bus *bus_if)
 	bt_if->cnt_detach++;
 	brcmf_dbg(INFO, "Done\n");
 }
-EXPORT_SYMBOL(ifx_bus_detach);
+EXPORT_SYMBOL(inf_bus_detach);
 
-u8 ifx_bus_reg_readb(struct brcmf_bus *bus_if, u8 fn, u32 addr, int *err)
+u8 inf_bus_reg_readb(struct brcmf_bus *bus_if, u8 fn, u32 addr, int *err)
 {
 	struct brcmf_sdio_dev *sdiodev = NULL;
 	struct sdio_func *func = NULL;
@@ -581,7 +582,7 @@ u8 ifx_bus_reg_readb(struct brcmf_bus *bus_if, u8 fn, u32 addr, int *err)
 
 	sdiodev = bus_if->bus_priv.sdio;
 
-	func = _btsdio_get_func_entity(sdiodev, fn);
+	func = inf_btsdio_get_func_entity(sdiodev, fn);
 	if (fn > SDIO_FUNC_3 || (fn != SDIO_FUNC_0 && !func)) {
 		brcmf_err("invalid function number = %d\n", fn);
 		*err = -EINVAL;
@@ -598,13 +599,13 @@ u8 ifx_bus_reg_readb(struct brcmf_bus *bus_if, u8 fn, u32 addr, int *err)
 	brcmf_dbg(SDIO, "F%d addr: 0x%08x, val: 0x%02x, err: %d\n", fn, addr, val, *err);
 
 	if (*err)
-		_btsdio_err_reg_record(bus_if->bt_if, ERR_REG_RB, *err, fn, addr, val);
+		inf_btsdio_err_reg_record(bus_if->bt_if, ERR_REG_RB, *err, fn, addr, val);
 
 	return val;
 }
-EXPORT_SYMBOL(ifx_bus_reg_readb);
+EXPORT_SYMBOL(inf_bus_reg_readb);
 
-void ifx_bus_reg_writeb(struct brcmf_bus *bus_if, u8 fn, u32 addr, u8 val, int *err)
+void inf_bus_reg_writeb(struct brcmf_bus *bus_if, u8 fn, u32 addr, u8 val, int *err)
 {
 	struct brcmf_sdio_dev *sdiodev = NULL;
 	struct sdio_func *func = NULL;
@@ -622,7 +623,7 @@ void ifx_bus_reg_writeb(struct brcmf_bus *bus_if, u8 fn, u32 addr, u8 val, int *
 
 	sdiodev = bus_if->bus_priv.sdio;
 
-	func = _btsdio_get_func_entity(sdiodev, fn);
+	func = inf_btsdio_get_func_entity(sdiodev, fn);
 	if (fn > SDIO_FUNC_3 || (fn != SDIO_FUNC_0 && !func)) {
 		brcmf_err("invalid function number = %d\n", fn);
 		*err = -EINVAL;
@@ -639,11 +640,11 @@ void ifx_bus_reg_writeb(struct brcmf_bus *bus_if, u8 fn, u32 addr, u8 val, int *
 	brcmf_dbg(SDIO, "F%d addr: 0x%08x, val: 0x%02x, err: %d\n", fn, addr, val, *err);
 
 	if (*err)
-		_btsdio_err_reg_record(bus_if->bt_if, ERR_REG_WB, *err, fn, addr, val);
+		inf_btsdio_err_reg_record(bus_if->bt_if, ERR_REG_WB, *err, fn, addr, val);
 }
-EXPORT_SYMBOL(ifx_bus_reg_writeb);
+EXPORT_SYMBOL(inf_bus_reg_writeb);
 
-u32 ifx_bus_reg_readl(struct brcmf_bus *bus_if, u32 addr, int *err)
+u32 inf_bus_reg_readl(struct brcmf_bus *bus_if, u32 addr, int *err)
 {
 	struct brcmf_sdio_dev *sdiodev = NULL;
 	u32 val = 0;
@@ -668,13 +669,13 @@ u32 ifx_bus_reg_readl(struct brcmf_bus *bus_if, u32 addr, int *err)
 	brcmf_dbg(SDIO, "addr: 0x%08x, val: 0x%02x, err: %d\n", addr, val, *err);
 
 	if (*err)
-		_btsdio_err_reg_record(bus_if->bt_if, ERR_REG_RL, *err, 1, addr, val);
+		inf_btsdio_err_reg_record(bus_if->bt_if, ERR_REG_RL, *err, 1, addr, val);
 
 	return val;
 }
-EXPORT_SYMBOL(ifx_bus_reg_readl);
+EXPORT_SYMBOL(inf_bus_reg_readl);
 
-void ifx_bus_reg_writel(struct brcmf_bus *bus_if, u32 addr, u32 val, int *err)
+void inf_bus_reg_writel(struct brcmf_bus *bus_if, u32 addr, u32 val, int *err)
 {
 	struct brcmf_sdio_dev *sdiodev = NULL;
 
@@ -698,11 +699,11 @@ void ifx_bus_reg_writel(struct brcmf_bus *bus_if, u32 addr, u32 val, int *err)
 	brcmf_dbg(SDIO, "addr: 0x%08x, val: 0x%08x, err: %d\n", addr, val, *err);
 
 	if (*err)
-		_btsdio_err_reg_record(bus_if->bt_if, ERR_REG_WL, *err, 1, addr, val);
+		inf_btsdio_err_reg_record(bus_if->bt_if, ERR_REG_WL, *err, 1, addr, val);
 }
-EXPORT_SYMBOL(ifx_bus_reg_writel);
+EXPORT_SYMBOL(inf_bus_reg_writel);
 
-int ifx_bus_recv_buf(struct brcmf_bus *bus_if, u8 *buf, u32 nbytes)
+int inf_bus_recv_buf(struct brcmf_bus *bus_if, u8 *buf, u32 nbytes)
 {
 	struct brcmf_sdio_dev *sdiodev = NULL;
 	int err = 0;
@@ -724,12 +725,12 @@ int ifx_bus_recv_buf(struct brcmf_bus *bus_if, u8 *buf, u32 nbytes)
 	brcmf_dbg(DATA, "F3 receive nbytes: %d, err: %d\n", nbytes, err);
 
 	if (err)
-		_btsdio_err_buf_record(bus_if->bt_if, ERR_BUF_RD, err, 0);
+		inf_btsdio_err_buf_record(bus_if->bt_if, ERR_BUF_RD, err, 0);
 
 	return err;
-} EXPORT_SYMBOL(ifx_bus_recv_buf);
+} EXPORT_SYMBOL(inf_bus_recv_buf);
 
-int ifx_bus_send_buf(struct brcmf_bus *bus_if, u8 *buf, u32 nbytes)
+int inf_bus_send_buf(struct brcmf_bus *bus_if, u8 *buf, u32 nbytes)
 {
 	struct brcmf_sdio_dev *sdiodev = NULL;
 	int err = 0;
@@ -751,12 +752,12 @@ int ifx_bus_send_buf(struct brcmf_bus *bus_if, u8 *buf, u32 nbytes)
 	brcmf_dbg(DATA, "F3 send nbytes: %d, err: %d\n", nbytes, err);
 
 	if (err)
-		_btsdio_err_buf_record(bus_if->bt_if, ERR_BUF_WT, err, nbytes);
+		inf_btsdio_err_buf_record(bus_if->bt_if, ERR_BUF_WT, err, nbytes);
 
 	return err;
-} EXPORT_SYMBOL(ifx_bus_send_buf);
+} EXPORT_SYMBOL(inf_bus_send_buf);
 
-int ifx_bus_membytes(struct brcmf_bus *bus_if, bool set, u32 address, u8 *data, u32 size)
+int inf_bus_membytes(struct brcmf_bus *bus_if, bool set, u32 address, u8 *data, u32 size)
 {
 	struct brcmf_sdio_dev *sdiodev = NULL;
 	int err = 0;
@@ -802,13 +803,13 @@ int ifx_bus_membytes(struct brcmf_bus *bus_if, bool set, u32 address, u8 *data, 
 	sdio_release_host(sdiodev->func1);
 
 	if (err)
-		_btsdio_err_mem_record(bus_if->bt_if, err, set, address, size);
+		inf_btsdio_err_mem_record(bus_if->bt_if, err, set, address, size);
 
 	return err;
 }
-EXPORT_SYMBOL(ifx_bus_membytes);
+EXPORT_SYMBOL(inf_bus_membytes);
 
-int ifx_bus_set_blocksz(struct brcmf_bus *bus_if, u16 blocksz)
+int inf_bus_set_blocksz(struct brcmf_bus *bus_if, u16 blocksz)
 {
 	struct brcmf_sdio_dev *sdiodev = NULL;
 	int err = 0;
@@ -832,15 +833,15 @@ int ifx_bus_set_blocksz(struct brcmf_bus *bus_if, u16 blocksz)
 
 	return err;
 }
-EXPORT_SYMBOL(ifx_bus_set_blocksz);
+EXPORT_SYMBOL(inf_bus_set_blocksz);
 
 /* Function to enable the Bus Clock
  * This function is not callable from non-sleepable context
  */
-int ifx_bus_clk_enable(struct brcmf_bus *bus_if)
+int inf_bus_clk_enable(struct brcmf_bus *bus_if)
 {
 	struct brcmf_sdio_dev *sdiodev = NULL;
-	struct ifx_bt_if *bt_if = NULL;
+	struct inf_bt_if *bt_if = NULL;
 	int err = 0;
 
 	if (!bus_if) {
@@ -861,15 +862,15 @@ int ifx_bus_clk_enable(struct brcmf_bus *bus_if)
 
 	return err;
 }
-EXPORT_SYMBOL(ifx_bus_clk_enable);
+EXPORT_SYMBOL(inf_bus_clk_enable);
 
 /* Function to disable the Bus Clock
  * This function is not callable from non-sleepable context
  */
-int ifx_bus_clk_disable(struct brcmf_bus *bus_if)
+int inf_bus_clk_disable(struct brcmf_bus *bus_if)
 {
 	struct brcmf_sdio_dev *sdiodev = NULL;
-	struct ifx_bt_if *bt_if = NULL;
+	struct inf_bt_if *bt_if = NULL;
 	int err = 0;
 
 	if (!bus_if) {
@@ -891,9 +892,9 @@ int ifx_bus_clk_disable(struct brcmf_bus *bus_if)
 
 	return err;
 }
-EXPORT_SYMBOL(ifx_bus_clk_disable);
+EXPORT_SYMBOL(inf_bus_clk_disable);
 
-static bool _btsdio_is_over_sdio(struct brcmf_bus *bus_if)
+static bool inf_btsdio_is_over_sdio(struct brcmf_bus *bus_if)
 {
 	struct brcmf_pub *drvr = NULL;
 	struct brcmf_if *ifp = NULL;
@@ -939,11 +940,11 @@ static bool _btsdio_is_over_sdio(struct brcmf_bus *bus_if)
 		return false;
 }
 
-void ifx_btsdio_init(struct brcmf_bus *bus_if)
+void inf_btsdio_init(struct brcmf_bus *bus_if)
 {
 	struct brcmf_sdio_dev *sdiodev = NULL;
+	struct inf_bt_if *bt_if = NULL;
 	struct brcmfmac_sdio_pd *pdata = NULL;
-	struct ifx_bt_if *bt_if = NULL;
 
 	brcmf_dbg(INFO, "Enter\n");
 
@@ -954,7 +955,7 @@ void ifx_btsdio_init(struct brcmf_bus *bus_if)
 	sdiodev = bus_if->bus_priv.sdio;
 	pdata = &sdiodev->settings->bus.sdio;
 
-	if (!_btsdio_is_over_sdio(bus_if)) {
+	if (!inf_btsdio_is_over_sdio(bus_if)) {
 		brcmf_err("bt over uart\n");
 		return;
 	}
@@ -989,7 +990,7 @@ void ifx_btsdio_init(struct brcmf_bus *bus_if)
 		  BTS_VER_MAJOR, BTS_VER_MINOR, BTS_VER_PATCH);
 }
 
-void ifx_btsdio_deinit(struct brcmf_bus *bus_if)
+void inf_btsdio_deinit(struct brcmf_bus *bus_if)
 {
 	struct brcmf_sdio_dev *sdiodev = NULL;
 	struct brcmfmac_sdio_pd *pdata = NULL;
@@ -1015,10 +1016,10 @@ void ifx_btsdio_deinit(struct brcmf_bus *bus_if)
 	}
 	sdio_release_host(sdiodev->func1);
 
-	ifx_bus_detach(bus_if);
+	inf_bus_detach(bus_if);
 
 	/* Free all error info */
-	_btsdio_err_free_all(bus_if->bt_if);
+	inf_btsdio_err_free_all(bus_if->bt_if);
 
 	/* Free bt dev */
 	kfree(bus_if->bt_if);
@@ -1029,7 +1030,7 @@ void ifx_btsdio_deinit(struct brcmf_bus *bus_if)
 	brcmf_dbg(INFO, "deinit done\n");
 }
 
-void ifx_btsdio_debugfs_create(struct brcmf_pub *drvr)
+void inf_btsdio_debugfs_create(struct brcmf_pub *drvr)
 {
-	brcmf_debugfs_add_entry(drvr, "bts_info", _btsdio_debugfs_read);
+	brcmf_debugfs_add_entry(drvr, "bts_info", inf_btsdio_debugfs_read);
 }
